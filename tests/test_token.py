@@ -1,7 +1,7 @@
-
 from pytest import raises
 
 from slug2.token import TokenType, tokenize, TokenizationError
+
 
 def test_tokenize_plus_minus():
     tokens = tokenize("""11 + 3 - 7""")
@@ -51,4 +51,3 @@ def test_more_types():
     ]
     for token, expected_type in zip(tokens, expected_types):
         assert token.tokentype == expected_type
-

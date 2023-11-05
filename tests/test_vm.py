@@ -2,6 +2,7 @@ from pytest import raises
 
 from slug2 import vm
 
+
 def test_assert() -> None:
     vm.interpret("""assert 1 == 1""")
 
@@ -17,4 +18,3 @@ def test_double_negative() -> None:
 def test_failed_assert() -> None:
     with raises(AssertionError):
         vm.interpret("""assert 1 == 0""")
-

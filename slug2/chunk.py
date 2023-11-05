@@ -57,7 +57,7 @@ class Op(Enum):
     # CLASS = auto()
     # INHERIT = auto()
     # METHOD = auto()
-    
+
     ASSERT = auto()
 
     def evaluate_binary(self, left: PythonNumber, right: PythonNumber) -> PythonNumber | bool:
@@ -77,7 +77,7 @@ class Op(Enum):
             case Op.DIVIDE:
                 return left / right
             case Op.EXPONENT:
-                return left ** right
+                return left**right
             case Op.LESS:
                 if isinstance(left, complex) or isinstance(right, complex):
                     raise RuntimeError("cannot use < to compare complex numbers")
