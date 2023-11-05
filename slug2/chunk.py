@@ -10,10 +10,16 @@ def check_number(a: Any) -> bool:
 
 class Op(Enum):
     CONSTANT = auto()
-    NOOP = auto()
+
+    ADD = auto()
+    SUBTRACT = auto()
+    MULTIPLY = auto()
+    DIVIDE = auto()
+    EXPONENT = auto()
+
     TRUE = auto()
     FALSE = auto()
-    POP = auto()
+
     # GET_LOCAL = auto()
     # SET_LOCAL = auto()
     # GET_GLOBAL = auto()
@@ -24,6 +30,7 @@ class Op(Enum):
     # GET_PROPERTY = auto()
     # SET_PROPERTY = auto()
     # GET_SUPER = auto()
+
     VALUE_EQUAL = auto()
     NOT_VALUE_EQUAL = auto()
     REFERENCE_EQUAL = auto()
@@ -31,26 +38,26 @@ class Op(Enum):
     GREATER_EQUAL = auto()
     LESS = auto()
     LESS_EQUAL = auto()
-    ADD = auto()
-    SUBTRACT = auto()
-    MULTIPLY = auto()
-    DIVIDE = auto()
-    EXPONENT = auto()
     NOT = auto()
     NEGATE = auto()
-    PRINT = auto()
-    JUMP = auto()
-    JUMP_IF_FALSE = auto()
-    LOOP = auto()
-    CALL = auto()
-    INVOKE = auto()
-    SUPER_INVOKE = auto()
-    CLOSURE = auto()
-    CLOSE_UPVALUE = auto()
+
+    # PRINT = auto()
+    # JUMP = auto()
+    # JUMP_IF_FALSE = auto()
+    # LOOP = auto()
+    # CALL = auto()
+    # INVOKE = auto()
+    # SUPER_INVOKE = auto()
+    # CLOSURE = auto()
+    # CLOSE_UPVALUE = auto()
+
+    NOOP = auto()
+    POP = auto()
     RETURN = auto()
-    CLASS = auto()
-    INHERIT = auto()
-    METHOD = auto()
+    # CLASS = auto()
+    # INHERIT = auto()
+    # METHOD = auto()
+    
     ASSERT = auto()
 
     def evaluate_binary(self, left: PythonNumber, right: PythonNumber) -> PythonNumber | bool:
