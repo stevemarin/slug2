@@ -109,6 +109,7 @@ class VM:
                     | Op.SUBTRACT
                     | Op.MULTIPLY
                     | Op.DIVIDE
+                    | Op.EXPONENT
                     | Op.LESS
                     | Op.LESS_EQUAL
                     | Op.GREATER

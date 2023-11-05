@@ -35,6 +35,7 @@ class Op(Enum):
     SUBTRACT = auto()
     MULTIPLY = auto()
     DIVIDE = auto()
+    EXPONENT = auto()
     NOT = auto()
     NEGATE = auto()
     PRINT = auto()
@@ -68,6 +69,8 @@ class Op(Enum):
                 return left * right
             case Op.DIVIDE:
                 return left / right
+            case Op.EXPONENT:
+                return left ** right
             case Op.LESS:
                 if isinstance(left, complex) or isinstance(right, complex):
                     raise RuntimeError("cannot use < to compare complex numbers")

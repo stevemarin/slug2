@@ -19,6 +19,7 @@ class Precedence(IntEnum):
     COMPARISON = auto()
     TERM = auto()
     FACTOR = auto()
+    EXPONENT = auto()
     UNARY = auto()
     CALL = auto()
     PRIMARY = auto()
@@ -163,6 +164,8 @@ def binary(parser: Parser, _: bool) -> None:
             emit_byte(Op.MULTIPLY, line)
         case TokenType.SLASH:
             emit_byte(Op.DIVIDE, line)
+        case TokenType.STAR_STAR:
+            emit_byte(Op.EXPONENT, line)
         case TokenType.LESS:
             emit_byte(Op.LESS, line)
         case TokenType.LESS_EQUAL:
@@ -256,6 +259,7 @@ ParseRules = {
     TokenType.MINUS:         ParseRule(unary,     binary, Precedence.TERM       ),
     TokenType.STAR:          ParseRule(None,      binary, Precedence.FACTOR     ),
     TokenType.SLASH:         ParseRule(None,      binary, Precedence.FACTOR     ),
+    TokenType.STAR_STAR:     ParseRule(None,      binary, Precedence.EXPONENT   ),
     TokenType.GREATER:       ParseRule(None,      binary, Precedence.COMPARISON ),
     TokenType.GREATER_EQUAL: ParseRule(None,      binary, Precedence.COMPARISON ),
     TokenType.LESS:          ParseRule(None,      binary, Precedence.COMPARISON ),
