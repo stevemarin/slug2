@@ -1,4 +1,6 @@
 
+from pytest import raises
+
 from slug2.token import TokenType, tokenize, TokenizationError
 
 def test_tokenize_plus_minus():
@@ -30,8 +32,6 @@ def test_tokenize_plus_minus():
 
 
 def test_tokenize_unexpected():
-    from pytest import raises
-
     with raises(TokenizationError):
         tokenize("""1 + 3 !""")
 
