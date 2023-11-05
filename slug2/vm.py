@@ -83,8 +83,6 @@ class VM:
             left: PythonNumber = self.stack.pop()
             self.stack.append(op.evaluate_binary(left, right))
 
-        print("constants", self.compilers[-1].function.chunk.constants)
-
         while len(self.stack) > 0:
             print("stack", self.stack)
 
@@ -120,7 +118,7 @@ class VM:
                 ):
                     binary_op(instruction)
                 case Op.NEGATE:
-                    self.stack.append(-self.stack.pop())
+                    self.stack[-1] *= -1
                 case Op.NOOP:
                     pass
                 case Op.ASSERT:
@@ -152,6 +150,16 @@ class VM:
         maybe_func.name = "SCRIPT"
         self.stack.append(maybe_func)
         self.call(maybe_func, 0)
+
+        if __debug__:
+            print()
+            print("Ops:")
+            for op in self.compilers[-1].function.chunk.code:
+                if isinstance(op, ConstantIndex):
+                    print(f"    {op} -> {self.compilers[-1].function.chunk.constants[op]}")
+                else:
+                    print(f"    {op}")
+            print()
 
         return self.run()
 

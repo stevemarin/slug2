@@ -21,5 +21,6 @@ def test_failed_assert() -> None:
 
 
 if __name__ == "__main__":
-    source = """assert (3 + 2 + 1) / 2 == 3.0"""
-    vm.interpret(source)
+    # vm.interpret("""assert (3 + 2 + 1) / -2 == -3.0""")
+
+    vm.interpret("""(1 + 1j) * (1 + -1j)""")

@@ -103,12 +103,12 @@ class TokenType(Enum):
     OR = "or"
 
     # control flow
-    FOR = "for"
-    WHILE = "while"
     IF = "if"
     THEN = "then"
     ELIF = "elif"
     ELSE = "else"
+    FOR = "for"
+    WHILE = "while"
     END = "end"
     DEFER = "defer"
     FINALLY = "finally"
@@ -136,7 +136,7 @@ class TokenType(Enum):
         for tt in TokenType:
             if tt.value == token:
                 return tt
-        raise TokenizationError("token {token} not found in TokenType")
+        raise TokenizationError(f"token {token} not found in TokenType")
 
 
 KWT = KeywordTree("")
@@ -144,6 +144,7 @@ for token in TokenType:
     KWT.add_token(token.value)
 
 DIGITS = frozenset(digits)
+DIGITS_UNDERSCORE = frozenset(DIGITS.union("_"))
 LETTERS = frozenset(ascii_letters)
 FIRST_CHARS = frozenset(LETTERS.union("_"))
 ALPHANUM = frozenset(FIRST_CHARS.union(DIGITS))
@@ -177,13 +178,58 @@ def tokenize(source: str) -> list[Token]:
         return False if current_idx + offset < source_length else True
 
     def get_number() -> tuple[int, Token]:
+        found_dot = False
+        found_j = False
+
+        # we already know offset = 0 is a DIGIT
         offset = 1
-        while not at_end(offset) and source[current_idx + offset] in DIGITS:
+
+        # integer part
+        for char in source[current_idx + offset :]:
+            if char not in DIGITS_UNDERSCORE:
+                break
+            else:
+                offset += 1
+
+        # decimal part
+        if not at_end(offset) and source[current_idx + offset] == ".":
+            found_dot = True
+            offset += 1
+            for char in source[current_idx + offset :]:
+                if char not in DIGITS_UNDERSCORE:
+                    break
+                else:
+                    offset += 1
+
+        # scientific notation part
+        if not at_end(offset) and source[current_idx + offset] in frozenset("eE"):
+            offset += 1
+            if source[current_idx + offset] in frozenset("-+"):
+                offset += 1
+            for char in source[current_idx + offset :]:
+                if char not in DIGITS_UNDERSCORE:
+                    break
+                else:
+                    offset += 1
+
+        # complex part
+        if not at_end(offset) and source[current_idx + offset] in frozenset("jJ"):
+            found_j = True
             offset += 1
 
-        literal = source[current_idx : current_idx + offset]
-        token = Token(TokenType.INTEGER, literal, int(literal), current_idx, line)
+        token_str = source[current_idx : current_idx + offset]
 
+        if found_j:
+            tokentype = TokenType.COMPLEX
+            value = complex(token_str)
+        elif found_dot:
+            tokentype = TokenType.FLOAT
+            value = float(token_str)
+        else:
+            tokentype = TokenType.INTEGER
+            value = int(token_str)
+
+        token = Token(tokentype, token_str, value, current_idx, line)
         return offset, token
 
     def until_not_chars(chars: set[str] | frozenset[str]) -> str:

@@ -40,6 +40,12 @@ class Parser:
         self.had_error: bool = False
         self.panic_mode: bool = False
 
+        if __debug__:
+            print("Tokens:")
+            for t in self.tokens:
+                print(f"    {t}")
+            print()
+
     def current(self) -> Token:
         return self.tokens[self.current_index]
 
@@ -108,8 +114,6 @@ def emit_byte(op: Op | ConstantIndex, line: int) -> None:
     from slug2 import vm
 
     chunk = vm.current_chunk()
-
-    print("emitting:", op)
 
     if chunk is None:
         raise ParseError("current_chunk is None")
@@ -196,12 +200,26 @@ def unary(parser: Parser, _: bool) -> None:
 
 def integer(parser: Parser, _: bool) -> None:
     previous = parser.previous()
-
-    value: int = int(previous.literal)
-    emit_constant(value, previous.line)
+    emit_constant(previous.value, previous.line)
 
     if __debug__:
         print(f"integer: {previous} on line {previous.line}")
+
+
+def float_(parser: Parser, _: bool) -> None:
+    previous = parser.previous()
+    emit_constant(previous.value, previous.line)
+
+    if __debug__:
+        print(f"float: {previous} on line {previous.line}")
+
+
+def complex_(parser: Parser, _: bool) -> None:
+    previous = parser.previous()
+    emit_constant(previous.value, previous.line)
+
+    if __debug__:
+        print(f"complex: {previous} on line {previous.line}")
 
 
 def grouping(parser: Parser, _: bool) -> None:
@@ -231,24 +249,26 @@ class ParseRule:
 
 # fmt: off
 ParseRules = {
-    TokenType.LEFT_PAREN:    ParseRule(grouping, call,   Precedence.CALL       ),
-    TokenType.RIGHT_PAREN:   ParseRule(None,     None,   Precedence.NONE       ),
+    TokenType.LEFT_PAREN:    ParseRule(grouping,  call,   Precedence.CALL       ),
+    TokenType.RIGHT_PAREN:   ParseRule(None,      None,   Precedence.NONE       ),
 
-    TokenType.PLUS:          ParseRule(None,     binary, Precedence.TERM       ),
-    TokenType.MINUS:         ParseRule(unary,    binary, Precedence.TERM       ),
-    TokenType.STAR:          ParseRule(None,     binary, Precedence.FACTOR     ),
-    TokenType.SLASH:         ParseRule(None,     binary, Precedence.FACTOR     ),
-    TokenType.GREATER:       ParseRule(None,     binary, Precedence.COMPARISON ),
-    TokenType.GREATER_EQUAL: ParseRule(None,     binary, Precedence.COMPARISON ),
-    TokenType.LESS:          ParseRule(None,     binary, Precedence.COMPARISON ),
-    TokenType.LESS_EQUAL:    ParseRule(None,     binary, Precedence.COMPARISON ),
-    TokenType.EQUAL_EQUAL:   ParseRule(None,     binary, Precedence.EQUALITY   ),
-    TokenType.NOT_EQUAL:     ParseRule(None,     binary, Precedence.EQUALITY   ),
+    TokenType.PLUS:          ParseRule(None,      binary, Precedence.TERM       ),
+    TokenType.MINUS:         ParseRule(unary,     binary, Precedence.TERM       ),
+    TokenType.STAR:          ParseRule(None,      binary, Precedence.FACTOR     ),
+    TokenType.SLASH:         ParseRule(None,      binary, Precedence.FACTOR     ),
+    TokenType.GREATER:       ParseRule(None,      binary, Precedence.COMPARISON ),
+    TokenType.GREATER_EQUAL: ParseRule(None,      binary, Precedence.COMPARISON ),
+    TokenType.LESS:          ParseRule(None,      binary, Precedence.COMPARISON ),
+    TokenType.LESS_EQUAL:    ParseRule(None,      binary, Precedence.COMPARISON ),
+    TokenType.EQUAL_EQUAL:   ParseRule(None,      binary, Precedence.EQUALITY   ),
+    TokenType.NOT_EQUAL:     ParseRule(None,      binary, Precedence.EQUALITY   ),
 
-    TokenType.INTEGER:       ParseRule(integer,  None,   Precedence.NONE       ),
-    TokenType.ASSERT:        ParseRule(None,     None,   Precedence.NONE       ),
+    TokenType.INTEGER:       ParseRule(integer,   None,   Precedence.NONE       ),
+    TokenType.FLOAT:         ParseRule(float_,    None,   Precedence.NONE       ),
+    TokenType.COMPLEX:       ParseRule(complex_,  None,   Precedence.NONE       ),
+    TokenType.ASSERT:        ParseRule(None,      None,   Precedence.NONE       ),
 
-    TokenType.EOF:           ParseRule(None,     None,   Precedence.NONE       ),
+    TokenType.EOF:           ParseRule(None,      None,   Precedence.NONE       ),
 
 }
 # fmt: one
