@@ -1,7 +1,7 @@
 from enum import Enum, auto
-from typing import Any
+from typing import Any, NewType, cast
 
-from slug2.common import ConstantIndex, PythonNumber
+from slug2.common import PythonNumber
 
 
 def check_number(a: Any) -> bool:
@@ -41,9 +41,11 @@ class Op(Enum):
     NOT = auto()
     NEGATE = auto()
 
+    JUMP = auto()
+    JUMP_IF_FALSE = auto()
+    JUMP_FAKE = auto()
+
     # PRINT = auto()
-    # JUMP = auto()
-    # JUMP_IF_FALSE = auto()
     # LOOP = auto()
     # CALL = auto()
     # INVOKE = auto()
@@ -102,18 +104,22 @@ class Op(Enum):
                 raise RuntimeError("invalid binary op")
 
 
+class ConstantIndex(int): pass
+class JumpDistance(int): pass
+Code = Op | ConstantIndex | JumpDistance
+
 class Chunk:
     __slots__ = ("code", "lines", "constants")
 
     def __init__(self) -> None:
-        self.code: list[Op | ConstantIndex] = []
+        self.code: list[Code] = []
         self.lines: list[int] = []
         self.constants: list[Any] = []
 
-    def write(self, op: Op | ConstantIndex, line: int) -> None:
+    def write(self, op: Code, line: int) -> None:
         self.code.append(op)
         self.lines.append(line)
 
-    def add_constant(self, value: Any) -> int:
+    def add_constant(self, value: Any) -> ConstantIndex:
         self.constants.append(value)
-        return len(self.constants) - 1
+        return ConstantIndex(len(self.constants) - 1)

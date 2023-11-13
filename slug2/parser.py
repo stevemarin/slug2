@@ -1,8 +1,7 @@
 from enum import IntEnum, auto
 from typing import Any, Callable, NewType, cast
 
-from slug2.chunk import Op
-from slug2.common import ConstantIndex
+from slug2.chunk import Code, Op, Chunk, JumpDistance, ConstantIndex
 from slug2.token import Token, TokenType, tokenize
 
 
@@ -46,7 +45,7 @@ class Parser:
             for t in self.tokens:
                 print(f"    {t}")
             print()
-
+    
     def current(self) -> Token:
         return self.tokens[self.current_index]
 
@@ -111,7 +110,15 @@ class Parser:
         self.parse_precedence(Precedence.ASSIGNMENT)
 
 
-def emit_byte(op: Op | ConstantIndex, line: int) -> None:
+def current_chunk() -> Chunk:
+    from slug2 import vm
+    chunk = vm.current_chunk()
+    if chunk is None:
+        raise RuntimeError("chunk is None")
+    return chunk
+
+
+def emit_byte(op: Code, line: int) -> None:
     from slug2 import vm
 
     chunk = vm.current_chunk()
@@ -122,27 +129,37 @@ def emit_byte(op: Op | ConstantIndex, line: int) -> None:
     chunk.write(op, line)
 
 
-def emit_bytes(op1: Op, op2: Op | ConstantIndex, line1: int, line2: int) -> None:
+def emit_bytes(op1: Op, op2: Code, line1: int, line2: int) -> None:
     emit_byte(op1, line1)
     emit_byte(op2, line2)
 
 
-def make_constant(value: Any) -> int:
-    from slug2 import vm
-
-    chunk = vm.current_chunk()
-    if chunk is not None:
-        return chunk.add_constant(value)
-    raise RuntimeError("chunk is None for constant")
+def make_constant(value: Any) -> ConstantIndex:
+    chunk = current_chunk()
+    return chunk.add_constant(value)
 
 
 def emit_constant(value: Any, line: int) -> None:
     constant_index = make_constant(value)
+    print(f"type constant_index: {type(constant_index)}")
     emit_bytes(Op.CONSTANT, constant_index, line, line)
 
 
 def emit_return(line: int) -> None:
     emit_bytes(Op.NOOP, Op.RETURN, line, line)
+
+
+def emit_jump(op: Op, line: JumpDistance) -> int:
+    emit_byte(op, line)
+    emit_byte(Op.JUMP_FAKE, line)
+
+    return len(current_chunk().code) - 1
+
+
+def patch_jump(offset: JumpDistance):
+    chunk = current_chunk()
+    jump: JumpDistance = cast(JumpDistance, len(chunk.code) - offset - 1)
+    chunk.code[offset] = jump
 
 
 def binary(parser: Parser, _: bool) -> None:

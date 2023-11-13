@@ -2,8 +2,8 @@ from collections import deque
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Any
 
-from slug2.chunk import Op
-from slug2.common import ConstantIndex, PythonNumber
+from slug2.chunk import Code, Op, ConstantIndex, JumpDistance
+from slug2.common import  PythonNumber
 from slug2.object import ObjFunction
 
 if TYPE_CHECKING:
@@ -23,7 +23,7 @@ class InterpretResult(Enum):
 class CallFrame:
     __slots__ = ("function", "ip", "slots")
 
-    def __init__(self, function: ObjFunction, ip: list[Op | ConstantIndex], slots: int) -> None:
+    def __init__(self, function: ObjFunction, ip: list[Code], slots: int) -> None:
         self.function = function
         self.ip = ip
         self.slots = slots
@@ -67,14 +67,13 @@ class VM:
         frame = self.frames[-1]
         ip_index: int = 0
 
-        def read_byte() -> tuple[int, Op | ConstantIndex]:
+        def read_byte() -> tuple[int, Code]:
             return ip_index + 1, frame.ip[ip_index]
 
         def read_constant() -> tuple[int, Any]:
             ip_index, value_index = read_byte()
             if isinstance(value_index, ConstantIndex):
-                value_index_int = int(value_index)
-                return ip_index, frame.function.chunk.constants[value_index_int]
+                return ip_index, frame.function.chunk.constants[value_index]
             else:
                 raise TypeError(f"expected ConstantIndex, got {type(value_index)}")
 
@@ -88,11 +87,13 @@ class VM:
 
             ip_index, instruction = read_byte()
 
-            if isinstance(instruction, ConstantIndex):
-                instruction = frame.function.chunk.constants[instruction]
+            # if type(instruction) == ConstantIndex:
+            #     instruction = frame.function.chunk.constants[instruction]
 
             if isinstance(instruction, ConstantIndex):
                 raise RuntimeError("instruction is ConstantIndex")
+            elif isinstance(instruction, JumpDistance):
+                raise RuntimeError("instruction is JumpDistance")
 
             match instruction:
                 case Op.CONSTANT:
@@ -156,8 +157,10 @@ class VM:
             print()
             print("Ops:")
             for op in self.compilers[-1].function.chunk.code:
-                if isinstance(op, ConstantIndex):
+                if type(op) == ConstantIndex:
                     print(f"    {op} -> {self.compilers[-1].function.chunk.constants[op]}")
+                elif type(op) == JumpDistance:
+                    print(f"    {op} jump to {self.compilers[-1].function.chunk.constants[op]}")
                 else:
                     print(f"    {op}")
             print()
