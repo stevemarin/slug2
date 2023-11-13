@@ -90,10 +90,8 @@ class VM:
             # if type(instruction) == ConstantIndex:
             #     instruction = frame.function.chunk.constants[instruction]
 
-            if isinstance(instruction, ConstantIndex):
-                raise RuntimeError("instruction is ConstantIndex")
-            elif isinstance(instruction, JumpDistance):
-                raise RuntimeError("instruction is JumpDistance")
+            if not isinstance(instruction, Op):
+                raise RuntimeError(f"instruction is {type(instruction)} not Op")
 
             match instruction:
                 case Op.CONSTANT:
@@ -121,8 +119,8 @@ class VM:
                     binary_op(instruction)
                 case Op.NEGATE:
                     self.stack[-1] *= -1
-                case Op.NOOP:
-                    pass
+                # case Op.NOOP:
+                #     pass
                 case Op.ASSERT:
                     test = self.stack.pop()
                     if not isinstance(test, bool):
@@ -130,11 +128,24 @@ class VM:
                     if not test:
                         raise AssertionError("assert failed")
                     self.stack.append(Op.NOOP)
+                case Op.PRINT:
+                    print(f"Printing from Slug2: {self.stack.pop()}")
+                case Op.JUMP:
+                    ip_index, instruction = read_byte()
+                    if not isinstance(instruction, JumpDistance):
+                        raise RuntimeError(f"expected JumpDistance, got {type(instruction)}")
+                    ip_index += int(instruction)
+                case Op.JUMP_IF_FALSE:
+                    ip_index, instruction = read_byte()
+                    if not isinstance(instruction, JumpDistance):
+                        raise RuntimeError(f"expected JumpDistance, got {type(instruction)}")
+                    if self.peek(0) is False:
+                        ip_index += int(instruction)
                 case Op.RETURN:
                     result = self.stack.pop()
                     _ = self.frames.pop()
                     if len(self.frames) == 0:
-                        _ = self.stack.pop()
+                        # _ = self.stack.pop()
                         return InterpretResult.OK
 
                     self.stack.append(result)
@@ -153,17 +164,17 @@ class VM:
         self.stack.append(maybe_func)
         self.call(maybe_func, 0)
 
-        if __debug__:
-            print()
-            print("Ops:")
-            for op in self.compilers[-1].function.chunk.code:
-                if type(op) == ConstantIndex:
-                    print(f"    {op} -> {self.compilers[-1].function.chunk.constants[op]}")
-                elif type(op) == JumpDistance:
-                    print(f"    {op} jump to {self.compilers[-1].function.chunk.constants[op]}")
-                else:
-                    print(f"    {op}")
-            print()
+        # if __debug__:
+        #     print()
+        #     print("Ops:")
+        #     for op in self.compilers[-1].function.chunk.code:
+        #         if type(op) == ConstantIndex:
+        #             print(f"    {op} -> {self.compilers[-1].function.chunk.constants[op]}")
+        #         elif type(op) == JumpDistance:
+        #             print(f"    {op} jump to {self.compilers[-1].function.chunk.constants[op]}")
+        #         else:
+        #             print(f"    {op}")
+        #     print()
 
         return self.run()
 

@@ -61,6 +61,7 @@ class Op(Enum):
     # METHOD = auto()
 
     ASSERT = auto()
+    PRINT = auto()
 
     def evaluate_binary(self, left: PythonNumber, right: PythonNumber) -> PythonNumber | bool:
         if not check_number(left) or not check_number(right):

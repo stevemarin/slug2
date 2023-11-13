@@ -1,5 +1,5 @@
 from enum import IntEnum, auto
-from typing import Any, Callable, NewType, cast
+from typing import Any, Callable, NewType, TypeVarTuple, cast
 
 from slug2.chunk import Code, Op, Chunk, JumpDistance, ConstantIndex
 from slug2.token import Token, TokenType, tokenize
@@ -67,22 +67,6 @@ class Parser:
         if not self.match(tokentype):
             raise ParseError(msg)
 
-    def declaration(self) -> None:
-        self.statement()
-
-    def expression_statement(self) -> None:
-        self.expression()
-
-    def statement(self) -> None:
-        if self.match(TokenType.ASSERT):
-            self.assert_()
-        else:
-            self.expression_statement()
-
-    def assert_(self) -> None:
-        self.expression()
-        emit_byte(Op.ASSERT, self.previous().line)
-
     def parse_precedence(self, precedence: Precedence) -> None:
         self.current_index += 1
 
@@ -108,6 +92,48 @@ class Parser:
 
     def expression(self) -> None:
         self.parse_precedence(Precedence.ASSIGNMENT)
+    
+    def expression_statement(self) -> None:
+        self.expression()
+        emit_byte(Op.POP, self.previous().line)
+ 
+    def assert_statement(self) -> None:
+        self.expression()
+        emit_byte(Op.ASSERT, self.previous().line)
+    
+    def print_statement(self):
+        self.expression()
+        emit_byte(Op.PRINT, self.previous().line)
+    
+    def if_statement(self) -> None:
+        self.expression()
+
+        then_jump = emit_jump(Op.JUMP_IF_FALSE, self.previous().line)
+        emit_byte(Op.POP, self.previous().line)
+        self.statement()
+        
+        else_jump = emit_jump(Op.JUMP, self.previous().line)
+
+        patch_jump(then_jump)
+        emit_byte(Op.POP, self.previous().line)
+
+        if self.match(TokenType.ELSE):
+            self.statement()
+        
+        patch_jump(else_jump)
+
+    def statement(self) -> None:
+        if self.match(TokenType.ASSERT):
+            self.assert_statement()
+        elif self.match(TokenType.PRINT):
+            self.print_statement()
+        elif self.match(TokenType.IF):
+            self.if_statement()
+        else:
+            self.expression_statement()
+        
+    def declaration(self) -> None:
+        self.statement()
 
 
 def current_chunk() -> Chunk:
@@ -141,25 +167,22 @@ def make_constant(value: Any) -> ConstantIndex:
 
 def emit_constant(value: Any, line: int) -> None:
     constant_index = make_constant(value)
-    print(f"type constant_index: {type(constant_index)}")
     emit_bytes(Op.CONSTANT, constant_index, line, line)
 
 
 def emit_return(line: int) -> None:
-    emit_bytes(Op.NOOP, Op.RETURN, line, line)
+    emit_bytes(Op.TRUE, Op.RETURN, line, line)
 
 
-def emit_jump(op: Op, line: JumpDistance) -> int:
+def emit_jump(op: Op, line: int) -> JumpDistance:
     emit_byte(op, line)
     emit_byte(Op.JUMP_FAKE, line)
-
-    return len(current_chunk().code) - 1
+    return JumpDistance(len(current_chunk().code) - 1)
 
 
 def patch_jump(offset: JumpDistance):
     chunk = current_chunk()
-    jump: JumpDistance = cast(JumpDistance, len(chunk.code) - offset - 1)
-    chunk.code[offset] = jump
+    chunk.code[offset] = JumpDistance(len(chunk.code) - offset - 1)
 
 
 def binary(parser: Parser, _: bool) -> None:
@@ -216,6 +239,18 @@ def unary(parser: Parser, _: bool) -> None:
             emit_byte(Op.NEGATE, line)
         case _:
             raise ValueError("unknown unary operator")
+
+
+def literal(parser: Parser, _: bool) -> None:
+    previous = parser.previous()
+    line = previous.line
+    match tokentype := previous.tokentype:
+        case TokenType.TRUE:
+            emit_byte(Op.TRUE, line)
+        case TokenType.FALSE:
+            emit_byte(Op.FALSE, line)
+        case _:
+            RuntimeError(f"unknown literal {tokentype}")
 
 
 def integer(parser: Parser, _: bool) -> None:
@@ -287,8 +322,13 @@ ParseRules = {
     TokenType.INTEGER:       ParseRule(integer,   None,   Precedence.NONE       ),
     TokenType.FLOAT:         ParseRule(float_,    None,   Precedence.NONE       ),
     TokenType.COMPLEX:       ParseRule(complex_,  None,   Precedence.NONE       ),
-    TokenType.ASSERT:        ParseRule(None,      None,   Precedence.NONE       ),
+    TokenType.TRUE:          ParseRule(literal,   None,   Precedence.NONE       ),
+    TokenType.FALSE:         ParseRule(literal,   None,   Precedence.NONE       ),
 
+    TokenType.IF:            ParseRule(None,      None,   Precedence.NONE       ),
+    TokenType.ELSE:          ParseRule(None,      None,   Precedence.NONE       ),
+    TokenType.ASSERT:        ParseRule(None,      None,   Precedence.NONE       ),
+    TokenType.PRINT:         ParseRule(None,      None,   Precedence.NONE       ),
     TokenType.EOF:           ParseRule(None,      None,   Precedence.NONE       ),
 
 }

@@ -118,6 +118,8 @@ class TokenType(Enum):
     INTEGER = "integer"
     FLOAT = "float"
     COMPLEX = "complex"
+    TRUE = "True"
+    FALSE = "False"
 
     # type conversion
     AS = "as"
@@ -126,6 +128,7 @@ class TokenType(Enum):
 
     # statements
     ASSERT = "assert"
+    PRINT = "print"
 
     # other
     IDENTIFIER = "identifier"
