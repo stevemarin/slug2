@@ -1,5 +1,5 @@
 from enum import IntEnum, auto
-from typing import Any, Callable, NewType, TypeVarTuple, cast
+from typing import Any, Callable, NewType, cast
 
 from slug2.chunk import Code, Op, Chunk, JumpDistance, ConstantIndex
 from slug2.token import Token, TokenType, tokenize
@@ -48,11 +48,13 @@ class Parser:
     
     def current(self) -> Token:
         return self.tokens[self.current_index]
+    
+    def peek(self, distance: int = 0) -> Token:
+        index = self.current_index + distance
+        if not 0 < index < len(self.tokens):
+            raise RuntimeError('bad index')
 
-    def previous(self) -> Token:
-        if not self.current_index > 0:
-            raise ParseError("trying to get negative index token")
-        return self.tokens[self.current_index - 1]
+        return self.tokens[index]
 
     def check(self, tokentype: TokenType) -> bool:
         return self.current().tokentype == tokentype
@@ -72,18 +74,18 @@ class Parser:
 
         assignable = cast(Assignable, precedence <= Precedence.ASSIGNMENT)
 
-        prefix = ParseRules[self.previous().tokentype].prefix
+        prefix = ParseRules[self.peek(-1).tokentype].prefix
         if prefix is None:
-            raise ParseError("expect expression")
+            raise ParseError(f"no prefix rule for {self.peek(-1).tokentype}")
         else:
             prefix(self, assignable)
 
         while precedence <= ParseRules[self.current().tokentype].precedence:
             self.current_index += 1
 
-            infix = ParseRules[self.previous().tokentype].infix
+            infix = ParseRules[self.peek(-1).tokentype].infix
             if infix is None:
-                raise ParseError("infix func is None")
+                raise ParseError(f"no infix rule for {self.peek(-1).tokentype}")
             else:
                 infix(self, assignable)
 
@@ -95,27 +97,27 @@ class Parser:
     
     def expression_statement(self) -> None:
         self.expression()
-        emit_byte(Op.POP, self.previous().line)
+        emit_byte(Op.POP, self.peek(-1).line)
  
     def assert_statement(self) -> None:
         self.expression()
-        emit_byte(Op.ASSERT, self.previous().line)
+        emit_byte(Op.ASSERT, self.peek(-1).line)
     
     def print_statement(self):
         self.expression()
-        emit_byte(Op.PRINT, self.previous().line)
+        emit_byte(Op.PRINT, self.peek(-1).line)
     
     def if_statement(self) -> None:
         self.expression()
 
-        then_jump = emit_jump(Op.JUMP_IF_FALSE, self.previous().line)
-        emit_byte(Op.POP, self.previous().line)
+        then_jump = emit_jump(Op.JUMP_IF_FALSE, self.peek(-1).line)
+        emit_byte(Op.POP, self.peek(-1).line)
         self.statement()
         
-        else_jump = emit_jump(Op.JUMP, self.previous().line)
+        else_jump = emit_jump(Op.JUMP, self.peek(-1).line)
 
         patch_jump(then_jump)
-        emit_byte(Op.POP, self.previous().line)
+        emit_byte(Op.POP, self.peek(-1).line)
 
         if self.match(TokenType.ELSE):
             self.statement()
@@ -186,7 +188,7 @@ def patch_jump(offset: JumpDistance):
 
 
 def binary(parser: Parser, _: bool) -> None:
-    previous = parser.previous()
+    previous = parser.peek(-1)
     operator_type: TokenType = previous.tokentype
     line = previous.line
     parse_rule = ParseRules[operator_type]
@@ -223,7 +225,7 @@ def binary(parser: Parser, _: bool) -> None:
 
 
 def unary(parser: Parser, _: bool) -> None:
-    previous = parser.previous()
+    previous = parser.peek(-1)
     operator_type: TokenType = previous.tokentype
     line = previous.line
 
@@ -242,7 +244,7 @@ def unary(parser: Parser, _: bool) -> None:
 
 
 def literal(parser: Parser, _: bool) -> None:
-    previous = parser.previous()
+    previous = parser.peek(-1)
     line = previous.line
     match tokentype := previous.tokentype:
         case TokenType.TRUE:
@@ -254,7 +256,7 @@ def literal(parser: Parser, _: bool) -> None:
 
 
 def integer(parser: Parser, _: bool) -> None:
-    previous = parser.previous()
+    previous = parser.peek(-1)
     emit_constant(previous.value, previous.line)
 
     if __debug__:
@@ -262,7 +264,7 @@ def integer(parser: Parser, _: bool) -> None:
 
 
 def float_(parser: Parser, _: bool) -> None:
-    previous = parser.previous()
+    previous = parser.peek(-1)
     emit_constant(previous.value, previous.line)
 
     if __debug__:
@@ -270,7 +272,7 @@ def float_(parser: Parser, _: bool) -> None:
 
 
 def complex_(parser: Parser, _: bool) -> None:
-    previous = parser.previous()
+    previous = parser.peek(-1)
     emit_constant(previous.value, previous.line)
 
     if __debug__:
@@ -279,7 +281,7 @@ def complex_(parser: Parser, _: bool) -> None:
 
 def grouping(parser: Parser, _: bool) -> None:
     parser.expression()
-    parser.consume(TokenType.RIGHT_PAREN, "iaefnieafn")
+    parser.consume(TokenType.RIGHT_PAREN, "didn't find closing )")
 
 
 def call(parser: Parser, _: bool) -> None:

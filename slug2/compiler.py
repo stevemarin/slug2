@@ -36,7 +36,7 @@ class Compiler:
         self.locals: list[Local] = []
 
         if functype != FuncType.SCRIPT:
-            name = self.parser.previous()
+            name = self.parser.peek(-1)
         else:
             name = Token(TokenType.IDENTIFIER, "SCRIPT", None, 0, 0)
 
@@ -47,7 +47,7 @@ class Compiler:
         while not self.parser.match(TokenType.EOF):
             self.parser.declaration()
 
-        function: ObjFunction = self.end(self.parser.previous().line)
+        function: ObjFunction = self.end(self.parser.peek(-1).line)
 
         return None if self.parser.had_error else function
 
