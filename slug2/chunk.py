@@ -67,6 +67,8 @@ class Op(Enum):
         if not check_number(left) or not check_number(right):
             raise RuntimeError("invalid number")
 
+        # TODO should we be able to add an int and float? (implicit conversion?)
+        #      maybe just for numbers?
         # if type(left) != type(right):
         #     raise RuntimeError("types don't match")
 

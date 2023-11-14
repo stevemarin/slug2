@@ -117,7 +117,7 @@ class Parser:
     
     def expression_statement(self) -> None:
         self.expression()
-        self.consume(TokenType.NEWLINE, "expect newline after expression")
+        # self.consume(TokenType.NEWLINE, "expect newline after expression")
         emit_byte(Op.POP, self.peek(-1).line)
  
     def assert_statement(self) -> None:
@@ -128,22 +128,34 @@ class Parser:
         self.expression()
         emit_byte(Op.PRINT, self.peek(-1).line)
     
+    def skip_newlines(self) -> None:
+        while self.peek().tokentype == TokenType.NEWLINE:
+            self.current_index += 1
+
     def if_statement(self) -> None:
         self.expression()
 
+        self.skip_newlines()
+        self.consume(TokenType.THEN, "expect then after if check")
+
         then_jump = emit_jump(Op.JUMP_IF_FALSE, self.peek(-1).line)
         emit_byte(Op.POP, self.peek(-1).line)
-        self.statement()
         
+        self.skip_newlines()
+        self.statement()
+
         else_jump = emit_jump(Op.JUMP, self.peek(-1).line)
 
         patch_jump(then_jump)
         emit_byte(Op.POP, self.peek(-1).line)
 
+        self.skip_newlines()
         if self.match(TokenType.ELSE):
+            self.skip_newlines()
             self.statement()
-        
+
         patch_jump(else_jump)
+
 
     def statement(self) -> None:
         if self.match(TokenType.NEWLINE):
@@ -352,6 +364,8 @@ ParseRules = {
 
     TokenType.IF:            ParseRule(None,      None,   Precedence.NONE       ),
     TokenType.ELSE:          ParseRule(None,      None,   Precedence.NONE       ),
+    TokenType.THEN:          ParseRule(None,      None,   Precedence.NONE       ),
+
     TokenType.ASSERT:        ParseRule(None,      None,   Precedence.NONE       ),
     TokenType.PRINT:         ParseRule(None,      None,   Precedence.NONE       ),
     TokenType.NEWLINE:       ParseRule(None,      None,   Precedence.NONE       ),
