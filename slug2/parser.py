@@ -45,19 +45,16 @@ class Parser:
             for t in self.tokens:
                 print(f"    {t}")
             print()
-    
-    def current(self) -> Token:
-        return self.tokens[self.current_index]
-    
+        
     def peek(self, distance: int = 0) -> Token:
         index = self.current_index + distance
-        if not 0 < index < len(self.tokens):
+        if not 0 <= index < len(self.tokens):
             raise RuntimeError('bad index')
 
         return self.tokens[index]
 
     def check(self, tokentype: TokenType) -> bool:
-        return self.current().tokentype == tokentype
+        return self.tokens[self.current_index].tokentype == tokentype
 
     def match(self, type: TokenType) -> bool:
         if self.check(type):
@@ -68,9 +65,29 @@ class Parser:
     def consume(self, tokentype: TokenType, msg: str) -> None:
         if not self.match(tokentype):
             raise ParseError(msg)
+    
+    def strip_current_newlines(self) -> None:
+        print(f"before: {len(self.tokens)}")
+        for token in self.tokens:
+            print(f"  : {token}")
 
-    def parse_precedence(self, precedence: Precedence) -> None:
+        strip : int = 0
+        while self.peek(strip).tokentype == TokenType.NEWLINE:
+            strip += 1
+
+        self.tokens = self.tokens[:self.current_index] + self.tokens[self.current_index + strip:]
+
+        print(f"after: {len(self.tokens)}")
+        for token in self.tokens:
+            print(f"  : {token}")
+        
+        print()
+
+    def parse_precedence(self, precedence: Precedence, group: bool = False) -> None:
         self.current_index += 1
+
+        if group:
+            self.strip_current_newlines()
 
         assignable = cast(Assignable, precedence <= Precedence.ASSIGNMENT)
 
@@ -80,8 +97,11 @@ class Parser:
         else:
             prefix(self, assignable)
 
-        while precedence <= ParseRules[self.current().tokentype].precedence:
+        while precedence <= ParseRules[self.peek().tokentype].precedence:
             self.current_index += 1
+
+            if group:
+                self.strip_current_newlines()
 
             infix = ParseRules[self.peek(-1).tokentype].infix
             if infix is None:
@@ -92,11 +112,12 @@ class Parser:
         if assignable and self.match(TokenType.EQUAL):
             raise ParseError("invalid assignment target")
 
-    def expression(self) -> None:
-        self.parse_precedence(Precedence.ASSIGNMENT)
+    def expression(self, group: bool = False) -> None:
+        self.parse_precedence(Precedence.ASSIGNMENT, group=group)
     
     def expression_statement(self) -> None:
         self.expression()
+        self.consume(TokenType.NEWLINE, "expect newline after expression")
         emit_byte(Op.POP, self.peek(-1).line)
  
     def assert_statement(self) -> None:
@@ -125,7 +146,9 @@ class Parser:
         patch_jump(else_jump)
 
     def statement(self) -> None:
-        if self.match(TokenType.ASSERT):
+        if self.match(TokenType.NEWLINE):
+            pass
+        elif self.match(TokenType.ASSERT):
             self.assert_statement()
         elif self.match(TokenType.PRINT):
             self.print_statement()
@@ -280,7 +303,7 @@ def complex_(parser: Parser, _: bool) -> None:
 
 
 def grouping(parser: Parser, _: bool) -> None:
-    parser.expression()
+    parser.expression(group=True)
     parser.consume(TokenType.RIGHT_PAREN, "didn't find closing )")
 
 
@@ -331,6 +354,7 @@ ParseRules = {
     TokenType.ELSE:          ParseRule(None,      None,   Precedence.NONE       ),
     TokenType.ASSERT:        ParseRule(None,      None,   Precedence.NONE       ),
     TokenType.PRINT:         ParseRule(None,      None,   Precedence.NONE       ),
+    TokenType.NEWLINE:       ParseRule(None,      None,   Precedence.NONE       ),
     TokenType.EOF:           ParseRule(None,      None,   Precedence.NONE       ),
 
 }

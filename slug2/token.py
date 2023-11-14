@@ -167,7 +167,7 @@ class Token:
         return len(self.literal)
 
     def __repr__(self) -> str:
-        return f"<Token :{self.tokentype} :'{self.literal}'>"
+        return f"<Token :{self.tokentype}>"
 
 
 def tokenize(source: str) -> list[Token]:
@@ -176,6 +176,9 @@ def tokenize(source: str) -> list[Token]:
     source_length: int = len(source)
 
     tokens: list[Token] = []
+
+    def newline() -> Token:
+        return Token(TokenType.NEWLINE, "\n", None, current_idx, line)
 
     def at_end(offset: int = 0) -> bool:
         return False if current_idx + offset < source_length else True
@@ -270,6 +273,7 @@ def tokenize(source: str) -> list[Token]:
             case " " | "\t":
                 current_idx += 1
             case "\n":
+                tokens.append(newline())
                 current_idx += 1
                 line += 1
             case char if char in DIGITS:
