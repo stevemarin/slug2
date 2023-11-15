@@ -22,16 +22,15 @@ def test_multiline():
     )
 
 
-def test_if():
-    from slug2 import vm
-
+def test_elseif():
     vm.interpret(
         """
         if 1 == 1
-            print True
+            assert True
+        else if True
+            assert False
         else
-            print False
+            assert False
         end
-        print 12345
     """
     )

@@ -103,7 +103,7 @@ class Parser:
                 raise ParseError(f"no infix rule for {self.peek(-1).tokentype}")
             else:
                 infix(self, assignable)
-            
+
             if group:
                 self.strip_current_newlines()
 
