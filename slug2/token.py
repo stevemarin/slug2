@@ -105,10 +105,11 @@ class TokenType(Enum):
     # control flow
     IF = "if"
     THEN = "then"
-    ELIF = "elif"
+    # ELSEIF = "elseif"
     ELSE = "else"
     FOR = "for"
     WHILE = "while"
+    LOOP = "loop"
     END = "end"
     DEFER = "defer"
     FINALLY = "finally"

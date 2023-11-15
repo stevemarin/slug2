@@ -3,7 +3,7 @@ from enum import Enum, auto
 from typing import TYPE_CHECKING, Any
 
 from slug2.chunk import Code, Op, ConstantIndex, JumpDistance
-from slug2.common import  PythonNumber
+from slug2.common import PythonNumber
 from slug2.object import ObjFunction
 
 if TYPE_CHECKING:
@@ -47,7 +47,7 @@ class VM:
         current_compiler = self.current_compiler()
         return current_compiler.function.chunk if current_compiler else None
 
-    def peek(self, distance: int) -> Any:
+    def peek(self, distance: int = 0) -> Any:
         return self.stack[-1 - distance]
 
     def call(self, function: ObjFunction, num_args: int) -> bool:
@@ -83,12 +83,9 @@ class VM:
             self.stack.append(op.evaluate_binary(left, right))
 
         while len(self.stack) > 0:
-            print("stack", self.stack)
+            # print(self)
 
             ip_index, instruction = read_byte()
-
-            # if type(instruction) == ConstantIndex:
-            #     instruction = frame.function.chunk.constants[instruction]
 
             if not isinstance(instruction, Op):
                 raise RuntimeError(f"instruction is {type(instruction)} not Op")
@@ -119,8 +116,6 @@ class VM:
                     binary_op(instruction)
                 case Op.NEGATE:
                     self.stack[-1] *= -1
-                # case Op.NOOP:
-                #     pass
                 case Op.ASSERT:
                     test = self.stack.pop()
                     if not isinstance(test, bool):
@@ -139,13 +134,15 @@ class VM:
                     ip_index, instruction = read_byte()
                     if not isinstance(instruction, JumpDistance):
                         raise RuntimeError(f"expected JumpDistance, got {type(instruction)}")
-                    if self.peek(0) is False:
+                    if not isinstance(self.peek(0), bool):
+                        raise RuntimeError("only booleans are truthy")
+                    if self.peek() is False:
                         ip_index += int(instruction)
                 case Op.RETURN:
                     result = self.stack.pop()
                     _ = self.frames.pop()
                     if len(self.frames) == 0:
-                        # _ = self.stack.pop()
+                        _ = self.stack.pop()
                         return InterpretResult.OK
 
                     self.stack.append(result)
@@ -164,18 +161,6 @@ class VM:
         self.stack.append(maybe_func)
         self.call(maybe_func, 0)
 
-        # if __debug__:
-        #     print()
-        #     print("Ops:")
-        #     for op in self.compilers[-1].function.chunk.code:
-        #         if type(op) == ConstantIndex:
-        #             print(f"    {op} -> {self.compilers[-1].function.chunk.constants[op]}")
-        #         elif type(op) == JumpDistance:
-        #             print(f"    {op} jump to {self.compilers[-1].function.chunk.constants[op]}")
-        #         else:
-        #             print(f"    {op}")
-        #     print()
-
         return self.run()
 
     def compile(self, source: str) -> ObjFunction | None:
@@ -186,3 +171,9 @@ class VM:
         maybe_func = root_compiler.compile()
 
         return maybe_func
+
+    def __repr__(self) -> str:
+        repr = "\nStack:\n"
+        for code in self.stack:
+            repr += str(code) + "\n"
+        return repr

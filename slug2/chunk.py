@@ -1,5 +1,5 @@
 from enum import Enum, auto
-from typing import Any, NewType, cast
+from typing import Any
 
 from slug2.common import PythonNumber
 
@@ -15,6 +15,7 @@ class Op(Enum):
     SUBTRACT = auto()
     MULTIPLY = auto()
     DIVIDE = auto()
+    INT_DIVIDE = auto()
     EXPONENT = auto()
 
     TRUE = auto()
@@ -107,9 +108,16 @@ class Op(Enum):
                 raise RuntimeError("invalid binary op")
 
 
-class ConstantIndex(int): pass
-class JumpDistance(int): pass
+class ConstantIndex(int):
+    pass
+
+
+class JumpDistance(int):
+    pass
+
+
 Code = Op | ConstantIndex | JumpDistance
+
 
 class Chunk:
     __slots__ = ("code", "lines", "constants")
@@ -126,3 +134,14 @@ class Chunk:
     def add_constant(self, value: Any) -> ConstantIndex:
         self.constants.append(value)
         return ConstantIndex(len(self.constants) - 1)
+
+    def __repr__(self) -> str:
+        repr = "\nChunk:\n"
+        for code in self.code:
+            if isinstance(code, ConstantIndex):
+                repr += f"  {code} -> {self.constants[code]}\n"
+            elif isinstance(code, JumpDistance):
+                repr += f"  jump -> {code}\n"
+            else:
+                repr += f"  {code}\n"
+        return repr

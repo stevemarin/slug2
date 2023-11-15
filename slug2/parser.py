@@ -45,16 +45,19 @@ class Parser:
             for t in self.tokens:
                 print(f"    {t}")
             print()
-        
+
     def peek(self, distance: int = 0) -> Token:
         index = self.current_index + distance
         if not 0 <= index < len(self.tokens):
-            raise RuntimeError('bad index')
+            raise RuntimeError("bad index")
 
         return self.tokens[index]
 
     def check(self, tokentype: TokenType) -> bool:
         return self.tokens[self.current_index].tokentype == tokentype
+
+    def check_multiple(self, tokentypes: set[TokenType]) -> bool:
+        return self.tokens[self.current_index].tokentype in tokentypes
 
     def match(self, type: TokenType) -> bool:
         if self.check(type):
@@ -65,23 +68,15 @@ class Parser:
     def consume(self, tokentype: TokenType, msg: str) -> None:
         if not self.match(tokentype):
             raise ParseError(msg)
-    
-    def strip_current_newlines(self) -> None:
-        print(f"before: {len(self.tokens)}")
-        for token in self.tokens:
-            print(f"  : {token}")
 
-        strip : int = 0
+    def strip_current_newlines(self) -> None:
+        strip: int = 0
         while self.peek(strip).tokentype == TokenType.NEWLINE:
             strip += 1
 
-        self.tokens = self.tokens[:self.current_index] + self.tokens[self.current_index + strip:]
-
-        print(f"after: {len(self.tokens)}")
-        for token in self.tokens:
-            print(f"  : {token}")
-        
-        print()
+        self.tokens = (  # stripping the current consecutive newlines from tokens
+            self.tokens[: self.current_index] + self.tokens[self.current_index + strip :]
+        )
 
     def parse_precedence(self, precedence: Precedence, group: bool = False) -> None:
         self.current_index += 1
@@ -114,48 +109,52 @@ class Parser:
 
     def expression(self, group: bool = False) -> None:
         self.parse_precedence(Precedence.ASSIGNMENT, group=group)
-    
+
     def expression_statement(self) -> None:
         self.expression()
-        # self.consume(TokenType.NEWLINE, "expect newline after expression")
         emit_byte(Op.POP, self.peek(-1).line)
- 
+
     def assert_statement(self) -> None:
         self.expression()
         emit_byte(Op.ASSERT, self.peek(-1).line)
-    
+
     def print_statement(self):
         self.expression()
         emit_byte(Op.PRINT, self.peek(-1).line)
-    
+
     def skip_newlines(self) -> None:
         while self.peek().tokentype == TokenType.NEWLINE:
             self.current_index += 1
 
     def if_statement(self) -> None:
-        self.expression()
+        jumps_to_end: list[JumpDistance] = []
 
-        self.skip_newlines()
-        self.consume(TokenType.THEN, "expect then after if check")
+        while True:  # in if-statement right after the if
+            self.expression()
+            self.consume(TokenType.NEWLINE, "expect newline after if clause")
 
-        then_jump = emit_jump(Op.JUMP_IF_FALSE, self.peek(-1).line)
-        emit_byte(Op.POP, self.peek(-1).line)
-        
-        self.skip_newlines()
-        self.statement()
+            jump_to_next_clause = emit_jump(Op.JUMP_IF_FALSE, self.peek(-1).line)
+            emit_byte(Op.POP, self.peek(-1).line)
 
-        else_jump = emit_jump(Op.JUMP, self.peek(-1).line)
+            self.block(set([TokenType.ELSE, TokenType.END]))
 
-        patch_jump(then_jump)
-        emit_byte(Op.POP, self.peek(-1).line)
+            jumps_to_end.append(emit_jump(Op.JUMP, self.peek(-1).line))
 
-        self.skip_newlines()
-        if self.match(TokenType.ELSE):
-            self.skip_newlines()
-            self.statement()
+            patch_jump(jump_to_next_clause)
+            emit_byte(Op.POP, self.peek(-1).line)
 
-        patch_jump(else_jump)
+            if self.match(TokenType.ELSE):  # consumes the else
+                if self.match(TokenType.IF):  # consumes the if
+                    continue  # else if statement -> back to top of loop
+                else:  # bare else statement -> fall through to break
+                    self.block(set([TokenType.END]))
 
+            break
+
+        self.consume(TokenType.END, "expect end after if block")
+
+        for jump in jumps_to_end:
+            patch_jump(jump)
 
     def statement(self) -> None:
         if self.match(TokenType.NEWLINE):
@@ -168,13 +167,19 @@ class Parser:
             self.if_statement()
         else:
             self.expression_statement()
-        
+
     def declaration(self) -> None:
         self.statement()
+
+    def block(self, end_tokentypes: set[TokenType]) -> None:
+        end_tokentypes_or_eof = end_tokentypes | set([TokenType.EOF])
+        while not self.check_multiple(end_tokentypes_or_eof):
+            self.declaration()
 
 
 def current_chunk() -> Chunk:
     from slug2 import vm
+
     chunk = vm.current_chunk()
     if chunk is None:
         raise RuntimeError("chunk is None")
@@ -239,10 +244,12 @@ def binary(parser: Parser, _: bool) -> None:
             emit_byte(Op.SUBTRACT, line)
         case TokenType.STAR:
             emit_byte(Op.MULTIPLY, line)
-        case TokenType.SLASH:
-            emit_byte(Op.DIVIDE, line)
         case TokenType.STAR_STAR:
             emit_byte(Op.EXPONENT, line)
+        case TokenType.SLASH:
+            emit_byte(Op.DIVIDE, line)
+        case TokenType.SLASH_SLASH:
+            emit_byte(Op.INT_DIVIDE, line)
         case TokenType.LESS:
             emit_byte(Op.LESS, line)
         case TokenType.LESS_EQUAL:
