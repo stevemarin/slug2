@@ -91,6 +91,7 @@ class TokenType(Enum):
     AMPERSAND_AMPERSAND = "&&"
     PIPE = "|"
     PIPE_PIPE = "||"
+    BANG = "!"
 
     # whitespace
     SPACE = " "
@@ -104,16 +105,16 @@ class TokenType(Enum):
 
     # control flow
     IF = "if"
-    THEN = "then"
-    # ELSEIF = "elseif"
     ELSE = "else"
+    END = "end"
     FOR = "for"
     WHILE = "while"
     LOOP = "loop"
-    END = "end"
     DEFER = "defer"
     FINALLY = "finally"
     WITH = "with"
+    LET = "let"
+    MUT = "mut"
 
     # types
     INTEGER = "integer"
@@ -239,6 +240,12 @@ def tokenize(source: str) -> list[Token]:
         token = Token(tokentype, token_str, value, current_idx, line)
         return offset, token
 
+    def until_char(char: str) -> str:
+        for length, c in enumerate(source[current_idx:]):
+            if c == char:
+                return source[current_idx : current_idx + length]
+        return source[current_idx:]
+
     def until_not_chars(chars: set[str] | frozenset[str]) -> str:
         for length, c in enumerate(source[current_idx:]):
             if c not in chars:
@@ -281,21 +288,27 @@ def tokenize(source: str) -> list[Token]:
                 offset, token = get_number()
                 tokens.append(token)
                 current_idx += offset
-            case char if char in FIRST_CHARS:
-                token_str = until_not_chars(ALPHANUM)
-                tokentype = TokenType.get(token_str)
-                token = Token(tokentype, char, None, current_idx, line)
-                tokens.append(token)
-                current_idx += len(token_str)
+            # case char if char in FIRST_CHARS:
+            #     token_str = until_not_chars(ALPHANUM)
+            #     tokentype = TokenType.get(token_str)
+            #     token = Token(tokentype, char, None, current_idx, line)
+            #     tokens.append(token)
+            #     current_idx += len(token_str)
+            case char if char == "#":
+                comment = until_char("\n")
+                current_idx += len(comment)
             case _:
-                maybe_token = get_reserved_token()
-                if maybe_token is None:
-                    start = max(0, current_idx - 5)
-                    end = min(len(source), current_idx + 5)
-                    context = source[start:end]
-                    raise TokenizationError(f"unexpected token at {current_idx}: {context}")
-                tokens.append(maybe_token)
-                current_idx += len(maybe_token.literal)
+                if (maybe_reserved := get_reserved_token()) is not None:
+                    tokens.append(maybe_reserved)
+                    current_idx += len(maybe_reserved.literal)
+                else:  # if it's not reserved it must be an identifier
+                    if (identifier_str := until_not_chars(ALPHANUM)) != "":
+                        identifier = Token(TokenType.IDENTIFIER, identifier_str, None, current_idx, line)
+                        tokens.append(identifier)
+                        current_idx += len(identifier_str)
+                    else:
+                        context = source[max(0, current_idx - 5) : min(len(source), current_idx + 5)]
+                        raise TokenizationError(f"unexpected token at {current_idx}: {context}")
 
     tokens.append(Token(TokenType.EOF, "", None, current_idx, line))
 

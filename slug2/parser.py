@@ -1,8 +1,11 @@
 from enum import IntEnum, auto
-from typing import Any, Callable, NewType, cast
+from typing import TYPE_CHECKING, Any, Callable, NewType, cast
 
-from slug2.chunk import Code, Op, Chunk, JumpDistance, ConstantIndex
+from slug2.chunk import Chunk, Code, ConstantIndex, JumpDistance, Op
 from slug2.token import Token, TokenType, tokenize
+
+if TYPE_CHECKING:
+    from slug2.compiler import Compiler
 
 
 class ParseError(Exception):
@@ -11,16 +14,16 @@ class ParseError(Exception):
 
 class Precedence(IntEnum):
     NONE = auto()
-    ASSIGNMENT = auto()
-    OR = auto()
-    AND = auto()
-    EQUALITY = auto()
-    COMPARISON = auto()
-    TERM = auto()
-    FACTOR = auto()
-    EXPONENT = auto()
-    UNARY = auto()
-    CALL = auto()
+    ASSIGNMENT = auto()  # =
+    OR = auto()  # or
+    AND = auto()  # and
+    EQUALITY = auto()  # == !=
+    COMPARISON = auto()  # > >= < <=
+    TERM = auto()  # +, -
+    FACTOR = auto()  # * / //
+    EXPONENT = auto()  # **
+    UNARY = auto()  # - not
+    CALL = auto()  # . ()
     PRIMARY = auto()
 
     def next_precedence(self) -> "Precedence":
@@ -171,13 +174,42 @@ class Parser:
         else:
             self.expression_statement()
 
+    def parse_variable(self, compiler: "Compiler", error_message: str) -> ConstantIndex:
+        self.consume(TokenType.IDENTIFIER, error_message)
+        previous = self.peek(-1)
+
+        if compiler.scope_depth > 0:
+            return ConstantIndex(0)
+
+        return identifier_constant(previous)
+
+    def variable_declaration(self) -> None:
+        compiler = current_compiler()
+
+        global_index = self.parse_variable(compiler, "expect variable name")
+        self.consume(TokenType.EQUAL, "expect = after variable name")
+
+        compiler.define_variable(self.peek(-1), global_index)
+
     def declaration(self) -> None:
-        self.statement()
+        if self.match(TokenType.LET):
+            self.variable_declaration()
+        else:
+            self.statement()
 
     def block(self, end_tokentypes: set[TokenType]) -> None:
         end_tokentypes_or_eof = end_tokentypes | set([TokenType.EOF])
         while not self.check_multiple(end_tokentypes_or_eof):
             self.declaration()
+
+
+def current_compiler() -> "Compiler":
+    from slug2 import vm
+
+    compiler = vm.current_compiler()
+    if compiler is None:
+        raise RuntimeError("compiler is None")
+    return compiler
 
 
 def current_chunk() -> Chunk:
@@ -208,6 +240,10 @@ def emit_bytes(op1: Op, op2: Code, line1: int, line2: int) -> None:
 def make_constant(value: Any) -> ConstantIndex:
     chunk = current_chunk()
     return chunk.add_constant(value)
+
+
+def identifier_constant(name: Token) -> ConstantIndex:
+    return make_constant(name.literal)
 
 
 def emit_constant(value: Any, line: int) -> None:
@@ -280,8 +316,6 @@ def unary(parser: Parser, _: bool) -> None:
     parser.parse_precedence(Precedence.UNARY)
 
     match operator_type:
-        # case TokenType.BANG:
-        #     emit_byte(OP_NOT, line)
         case TokenType.MINUS:
             emit_byte(Op.NEGATE, line)
         case _:
@@ -374,11 +408,14 @@ ParseRules = {
 
     TokenType.IF:            ParseRule(None,      None,   Precedence.NONE       ),
     TokenType.ELSE:          ParseRule(None,      None,   Precedence.NONE       ),
-    TokenType.THEN:          ParseRule(None,      None,   Precedence.NONE       ),
 
     TokenType.ASSERT:        ParseRule(None,      None,   Precedence.NONE       ),
     TokenType.PRINT:         ParseRule(None,      None,   Precedence.NONE       ),
+    TokenType.LET:           ParseRule(None,      None,   Precedence.NONE       ),
+    TokenType.IDENTIFIER:    ParseRule(None,      None,   Precedence.NONE       ),
+
     TokenType.NEWLINE:       ParseRule(None,      None,   Precedence.NONE       ),
+
     TokenType.EOF:           ParseRule(None,      None,   Precedence.NONE       ),
 
 }

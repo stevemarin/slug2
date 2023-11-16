@@ -1,8 +1,11 @@
 from enum import Enum, auto
 
+from slug2.chunk import ConstantIndex
 from slug2.object import ObjFunction
-from slug2.parser import Parser, emit_return
+from slug2.parser import Parser, emit_bytes, emit_return
 from slug2.token import Token, TokenType
+
+__max_locals__ = 256
 
 
 class Local:
@@ -10,7 +13,7 @@ class Local:
 
     def __init__(self, name: Token):
         self.name: Token = name
-        self.depth: int = 0
+        self.depth: int = -1
         self.captured: bool = False
 
     def capture(self):
@@ -54,3 +57,37 @@ class Compiler:
     def end(self, line: int) -> ObjFunction:
         emit_return(line)
         return self.function
+
+    def add_local(self, name: Token) -> None:
+        if len(self.locals) == __max_locals__:
+            raise RuntimeError("too many locals")
+
+        self.locals.append(Local(name))
+
+    def declare_variable(self, name: Token):
+        if self.scope_depth == 0:
+            return
+
+        for local in reversed(self.locals):
+            if local.depth != -1 and local.depth < self.scope_depth:
+                break
+
+            if name.literal == local.name.literal:
+                raise RuntimeError("a variable exists with same name in this scope")
+
+        self.add_local(name)
+
+    def mark_initialized(self) -> None:
+        if self.scope_depth == 0:
+            return
+
+        self.locals[-1].depth = self.scope_depth
+
+    def define_variable(self, name: Token, global_index: ConstantIndex) -> None:
+        if self.scope_depth > 0:
+            self.mark_initialized()
+            return
+
+        from slug2.chunk import Op
+
+        emit_bytes(Op.DEFINE_GLOBAL, global_index, name.line, name.line)

@@ -2,7 +2,7 @@ from collections import deque
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Any
 
-from slug2.chunk import Code, Op, ConstantIndex, JumpDistance
+from slug2.chunk import Code, ConstantIndex, JumpDistance, Op
 from slug2.common import PythonNumber
 from slug2.object import ObjFunction
 
@@ -116,6 +116,12 @@ class VM:
                     binary_op(instruction)
                 case Op.NEGATE:
                     self.stack[-1] *= -1
+                case Op.DEFINE_GLOBAL:
+                    ip_index, name = read_constant()
+                    if not isinstance(name, str):
+                        raise RuntimeError("global name not string")
+                    self.globals[name] = self.peek()
+                    _ = self.stack.pop()
                 case Op.ASSERT:
                     test = self.stack.pop()
                     if not isinstance(test, bool):
