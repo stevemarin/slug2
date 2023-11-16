@@ -1,11 +1,15 @@
 from enum import Enum, auto
 
-from slug2.chunk import ConstantIndex
+from slug2.common import ConstantIndex, LocalIndex
 from slug2.object import ObjFunction
 from slug2.parser import Parser, emit_bytes, emit_return
 from slug2.token import Token, TokenType
 
 __max_locals__ = 256
+
+
+class CompilerError(Exception):
+    pass
 
 
 class Local:
@@ -60,7 +64,7 @@ class Compiler:
 
     def add_local(self, name: Token) -> None:
         if len(self.locals) == __max_locals__:
-            raise RuntimeError("too many locals")
+            raise CompilerError("too many locals")
 
         self.locals.append(Local(name))
 
@@ -73,7 +77,7 @@ class Compiler:
                 break
 
             if name.literal == local.name.literal:
-                raise RuntimeError("a variable exists with same name in this scope")
+                raise CompilerError("a variable exists with same name in this scope")
 
         self.add_local(name)
 
@@ -91,3 +95,11 @@ class Compiler:
         from slug2.chunk import Op
 
         emit_bytes(Op.DEFINE_GLOBAL, global_index, name.line, name.line)
+
+    def resolve_local(self, name: Token) -> None | LocalIndex:
+        for idx, local in enumerate(reversed(self.locals)):
+            if name.literal == local.name.literal:
+                if local.depth == -1:
+                    raise CompilerError("canot real local variable in own initializer")
+                return LocalIndex(idx)
+        return None

@@ -1,4 +1,3 @@
-
 from slug2.token import TokenType, tokenize
 
 

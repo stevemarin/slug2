@@ -1,7 +1,8 @@
 from enum import IntEnum, auto
 from typing import TYPE_CHECKING, Any, Callable, NewType, cast
 
-from slug2.chunk import Chunk, Code, ConstantIndex, JumpDistance, Op
+from slug2.common import ConstantIndex, JumpDistance, LocalIndex
+from slug2.chunk import Chunk, Code, Op
 from slug2.token import Token, TokenType, tokenize
 
 if TYPE_CHECKING:
@@ -202,6 +203,24 @@ class Parser:
         while not self.check_multiple(end_tokentypes_or_eof):
             self.declaration()
 
+    def named_variable(self, name: Token, can_assign: bool) -> None:
+        compiler = current_compiler()
+        
+        arg: LocalIndex | ConstantIndex | None
+        if (arg := compiler.resolve_local(name)) is not None:
+            get_op = Op.GET_LOCAL
+            set_op = Op.SET_LOCAL
+        else:
+            arg = identifier_constant(name)
+            get_op = Op.GET_GLOBAL
+            set_op = Op.SET_GLOBAL
+        
+        if can_assign and self.match(TokenType.EQUAL):
+            self.expression()
+            emit_bytes(set_op, arg, name.line, name.line)
+        else:
+            emit_bytes(get_op, arg, name.line, name.line)
+
 
 def current_compiler() -> "Compiler":
     from slug2 import vm
@@ -363,6 +382,10 @@ def grouping(parser: Parser, _: bool) -> None:
     parser.consume(TokenType.RIGHT_PAREN, "didn't find closing )")
 
 
+def variable(parser: Parser, can_assign: bool) -> None:
+    parser.named_variable(parser.peek(-1), can_assign)
+
+
 def call(parser: Parser, _: bool) -> None:
     raise NotImplementedError
 
@@ -405,6 +428,7 @@ ParseRules = {
     TokenType.COMPLEX:       ParseRule(complex_,  None,   Precedence.NONE       ),
     TokenType.TRUE:          ParseRule(literal,   None,   Precedence.NONE       ),
     TokenType.FALSE:         ParseRule(literal,   None,   Precedence.NONE       ),
+    TokenType.IDENTIFIER:    ParseRule(variable,      None,   Precedence.NONE       ),
 
     TokenType.IF:            ParseRule(None,      None,   Precedence.NONE       ),
     TokenType.ELSE:          ParseRule(None,      None,   Precedence.NONE       ),
@@ -412,7 +436,6 @@ ParseRules = {
     TokenType.ASSERT:        ParseRule(None,      None,   Precedence.NONE       ),
     TokenType.PRINT:         ParseRule(None,      None,   Precedence.NONE       ),
     TokenType.LET:           ParseRule(None,      None,   Precedence.NONE       ),
-    TokenType.IDENTIFIER:    ParseRule(None,      None,   Precedence.NONE       ),
 
     TokenType.NEWLINE:       ParseRule(None,      None,   Precedence.NONE       ),
 

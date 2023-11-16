@@ -1,11 +1,8 @@
 from enum import Enum, auto
 from typing import Any
 
-from slug2.common import PythonNumber
-
-
-def check_number(a: Any) -> bool:
-    return isinstance(a, (int, float, complex))
+from slug2.common import (ConstantIndex, LocalIndex, JumpDistance, PythonNumber,
+                          check_number)
 
 
 class Op(Enum):
@@ -24,8 +21,8 @@ class Op(Enum):
     DEFINE_GLOBAL = auto()
     SET_GLOBAL = auto()
     GET_GLOBAL = auto()
-    # GET_LOCAL = auto()
-    # SET_LOCAL = auto()
+    GET_LOCAL = auto()
+    SET_LOCAL = auto()
     # GET_UPVALUE = auto()
     # SET_UPVALUE = auto()
     # GET_PROPERTY = auto()
@@ -108,15 +105,7 @@ class Op(Enum):
                 raise RuntimeError("invalid binary op")
 
 
-class ConstantIndex(int):
-    pass
-
-
-class JumpDistance(int):
-    pass
-
-
-Code = Op | ConstantIndex | JumpDistance
+Code = Op | ConstantIndex | LocalIndex | JumpDistance
 
 
 class Chunk:
