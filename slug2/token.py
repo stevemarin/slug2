@@ -1,4 +1,5 @@
 from enum import Enum
+import enum
 from string import ascii_letters, digits
 from typing import Any
 
@@ -175,7 +176,6 @@ class Token:
 def tokenize(source: str) -> list[Token]:
     current_idx: int = 0
     line: int = 0
-    source_length: int = len(source)
 
     tokens: list[Token] = []
 
@@ -183,7 +183,7 @@ def tokenize(source: str) -> list[Token]:
         return Token(TokenType.NEWLINE, "\n", None, current_idx, line)
 
     def at_end(offset: int = 0) -> bool:
-        return False if current_idx + offset < source_length else True
+        return False if current_idx + offset < len(source) else True
 
     def get_number() -> tuple[int, Token]:
         found_dot = False
@@ -252,27 +252,18 @@ def tokenize(source: str) -> list[Token]:
                 return source[current_idx : current_idx + length]
         return source[current_idx:]
 
-    def remaining_chars() -> str:
-        return source[current_idx:]
-
     def get_reserved_token() -> None | Token:
         kwt_node = KWT
         token_str: str | None = None
 
-        num_remaining_chars = len(remaining_chars())
-        if num_remaining_chars == 1:
-            kwt_node = KWT[source[current_idx]]
-            if kwt_node.token is not None:
-                token_str = kwt_node.token
-        else:
-            for distance in range(num_remaining_chars):
-                try:
-                    current_token_str = source[current_idx : current_idx + distance]
-                    kwt_node = KWT[current_token_str]
-                    if kwt_node.token is not None:
-                        token_str = kwt_node.token
-                except KeyError:
-                    break
+        for distance, _ in enumerate(source[current_idx:]):
+            try:
+                current_token_str = source[current_idx : current_idx + distance + 1]
+                kwt_node = KWT[current_token_str]
+                if kwt_node.token is not None:
+                    token_str = kwt_node.token
+            except KeyError:
+                break
 
         return None if token_str is None else Token(TokenType.get(token_str), token_str, None, current_idx, line)
 
@@ -288,12 +279,6 @@ def tokenize(source: str) -> list[Token]:
                 offset, token = get_number()
                 tokens.append(token)
                 current_idx += offset
-            # case char if char in FIRST_CHARS:
-            #     token_str = until_not_chars(ALPHANUM)
-            #     tokentype = TokenType.get(token_str)
-            #     token = Token(tokentype, char, None, current_idx, line)
-            #     tokens.append(token)
-            #     current_idx += len(token_str)
             case char if char == "#":
                 comment = until_char("\n")
                 current_idx += len(comment)

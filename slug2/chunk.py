@@ -21,8 +21,11 @@ class Op(Enum):
     DEFINE_GLOBAL = auto()
     SET_GLOBAL = auto()
     GET_GLOBAL = auto()
+    
     GET_LOCAL = auto()
     SET_LOCAL = auto()
+
+    CLOSE_UPVALUE = auto()
     # GET_UPVALUE = auto()
     # SET_UPVALUE = auto()
     # GET_PROPERTY = auto()
@@ -31,7 +34,7 @@ class Op(Enum):
 
     VALUE_EQUAL = auto()
     NOT_VALUE_EQUAL = auto()
-    REFERENCE_EQUAL = auto()
+    # REFERENCE_EQUAL = auto()
     GREATER = auto()
     GREATER_EQUAL = auto()
     LESS = auto()
@@ -43,23 +46,21 @@ class Op(Enum):
     JUMP_IF_FALSE = auto()
     JUMP_FAKE = auto()
 
-    # PRINT = auto()
     # LOOP = auto()
     # CALL = auto()
     # INVOKE = auto()
     # SUPER_INVOKE = auto()
     # CLOSURE = auto()
-    # CLOSE_UPVALUE = auto()
 
     NOOP = auto()
     POP = auto()
     RETURN = auto()
+    ASSERT = auto()
+    PRINT = auto()
     # CLASS = auto()
     # INHERIT = auto()
     # METHOD = auto()
 
-    ASSERT = auto()
-    PRINT = auto()
 
     def evaluate_binary(self, left: PythonNumber, right: PythonNumber) -> PythonNumber | bool:
         if not check_number(left) or not check_number(right):
@@ -125,7 +126,7 @@ class Chunk:
         return ConstantIndex(len(self.constants) - 1)
 
     def __repr__(self) -> str:
-        repr = "\nChunk:\n"
+        repr = "\nCHUNK:\n"
         for code in self.code:
             if isinstance(code, ConstantIndex):
                 repr += f"  {code} -> {self.constants[code]}\n"

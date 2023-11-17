@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Callable
 
 PythonNumber = complex | float | int
 

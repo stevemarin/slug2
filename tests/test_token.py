@@ -29,11 +29,6 @@ def test_tokenize_plus_minus():
     assert tokens[5].tokentype == TokenType.EOF
 
 
-# def test_tokenize_unexpected():
-#     with raises(TokenizationError):
-#         tokenize("""1 + assert""")
-
-
 def test_more_types():
     tokens = tokenize("""3==!=.....3;^""")
     expected_types = [

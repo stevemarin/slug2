@@ -45,7 +45,7 @@ class Parser:
         self.panic_mode: bool = False
 
         if __debug__:
-            print("Tokens:")
+            print("TOKENS:")
             for t in self.tokens:
                 print(f"    {t}")
             print()
@@ -83,6 +83,9 @@ class Parser:
         )
 
     def parse_precedence(self, precedence: Precedence, group: bool = False) -> None:
+        if __debug__:
+            print(f"parse_precedence :{precedence} :{group} on line {self.peek(0).line}")
+
         self.current_index += 1
 
         if group:
@@ -114,6 +117,7 @@ class Parser:
         if assignable and self.match(TokenType.EQUAL):
             raise ParseError("invalid assignment target")
 
+
     def expression(self, group: bool = False) -> None:
         self.parse_precedence(Precedence.ASSIGNMENT, group=group)
 
@@ -143,7 +147,7 @@ class Parser:
             jump_to_next_clause = emit_jump(Op.JUMP_IF_FALSE, self.peek(-1).line)
             emit_byte(Op.POP, self.peek(-1).line)
 
-            self.block(set([TokenType.ELSE, TokenType.END]))
+            self.block([TokenType.ELSE, TokenType.END])
 
             jumps_to_end.append(emit_jump(Op.JUMP, self.peek(-1).line))
 
@@ -154,7 +158,7 @@ class Parser:
                 if self.match(TokenType.IF):  # consumes the if
                     continue  # else if statement -> back to top of loop
                 else:  # bare else statement -> fall through to break
-                    self.block(set([TokenType.END]))
+                    self.block([TokenType.END])
 
             break
 
@@ -172,25 +176,45 @@ class Parser:
             self.print_statement()
         elif self.match(TokenType.IF):
             self.if_statement()
+        elif self.match(TokenType.LEFT_BRACE):
+            compiler = current_compiler()
+            compiler.begin_scope()
+            self.block([TokenType.RIGHT_BRACE])
+            self.consume(TokenType.RIGHT_BRACE, "no closing }")
+            compiler.end_scope(self.peek(-1).line)
         else:
             self.expression_statement()
 
     def parse_variable(self, compiler: "Compiler", error_message: str) -> ConstantIndex:
+        if __debug__:
+            print(f"parse_variable on line {self.peek(0).line}")
+
         self.consume(TokenType.IDENTIFIER, error_message)
         previous = self.peek(-1)
 
+        compiler.declare_variable(previous)
         if compiler.scope_depth > 0:
             return ConstantIndex(0)
 
         return identifier_constant(previous)
 
     def variable_declaration(self) -> None:
+        if __debug__:
+            print(f"variable_declaration on line {self.peek(0).line}")
+            
         compiler = current_compiler()
 
-        global_index = self.parse_variable(compiler, "expect variable name")
+        constant_index = self.parse_variable(compiler, "expect variable name")
         self.consume(TokenType.EQUAL, "expect = after variable name")
+        self.expression()
 
-        compiler.define_variable(self.peek(-1), global_index)
+        compiler.define_variable(self.peek(-1), constant_index)
+
+        if __debug__:
+            print("\nLOCALS:")
+            for local in compiler.locals:
+                print(f"  {local}")
+            print()
 
     def declaration(self) -> None:
         if self.match(TokenType.LET):
@@ -198,12 +222,18 @@ class Parser:
         else:
             self.statement()
 
-    def block(self, end_tokentypes: set[TokenType]) -> None:
-        end_tokentypes_or_eof = end_tokentypes | set([TokenType.EOF])
+    def block(self, end_tokentypes: list[TokenType]) -> None:
+        if __debug__:
+            print(f"block on line {self.peek(0).line}")
+
+        end_tokentypes_or_eof = set(end_tokentypes + [TokenType.EOF])
         while not self.check_multiple(end_tokentypes_or_eof):
             self.declaration()
 
     def named_variable(self, name: Token, can_assign: bool) -> None:
+        if __debug__:
+            print(f"named_variable :{name.literal} on line {self.peek(0).line}")
+
         compiler = current_compiler()
         
         arg: LocalIndex | ConstantIndex | None
@@ -344,6 +374,10 @@ def unary(parser: Parser, _: bool) -> None:
 def literal(parser: Parser, _: bool) -> None:
     previous = parser.peek(-1)
     line = previous.line
+
+    if __debug__:
+        print(f"literal: {previous.value} on line {previous.line}")
+
     match tokentype := previous.tokentype:
         case TokenType.TRUE:
             emit_byte(Op.TRUE, line)
@@ -353,29 +387,32 @@ def literal(parser: Parser, _: bool) -> None:
             RuntimeError(f"unknown literal {tokentype}")
 
 
-def integer(parser: Parser, _: bool) -> None:
+def integer(
+    parser: Parser, _: bool) -> None:
     previous = parser.peek(-1)
-    emit_constant(previous.value, previous.line)
 
     if __debug__:
         print(f"integer: {previous} on line {previous.line}")
 
-
-def float_(parser: Parser, _: bool) -> None:
-    previous = parser.peek(-1)
     emit_constant(previous.value, previous.line)
 
+
+
+def _float(parser: Parser, _: bool) -> None:
+    previous = parser.peek(-1)
+    
     if __debug__:
         print(f"float: {previous} on line {previous.line}")
 
-
-def complex_(parser: Parser, _: bool) -> None:
-    previous = parser.peek(-1)
     emit_constant(previous.value, previous.line)
+
+def _complex(parser: Parser, _: bool) -> None:
+    previous = parser.peek(-1)
 
     if __debug__:
         print(f"complex: {previous} on line {previous.line}")
 
+    emit_constant(previous.value, previous.line)
 
 def grouping(parser: Parser, _: bool) -> None:
     parser.expression(group=True)
@@ -383,7 +420,12 @@ def grouping(parser: Parser, _: bool) -> None:
 
 
 def variable(parser: Parser, can_assign: bool) -> None:
-    parser.named_variable(parser.peek(-1), can_assign)
+    previous = parser.peek(-1)
+
+    if __debug__:
+        print(f"variable: {previous.literal} on line {previous.line}")
+
+    parser.named_variable(previous, can_assign)
 
 
 def call(parser: Parser, _: bool) -> None:
@@ -410,6 +452,8 @@ class ParseRule:
 ParseRules = {
     TokenType.LEFT_PAREN:    ParseRule(grouping,  call,   Precedence.CALL       ),
     TokenType.RIGHT_PAREN:   ParseRule(None,      None,   Precedence.NONE       ),
+    TokenType.LEFT_BRACE:    ParseRule(None,      None,   Precedence.NONE       ),
+    TokenType.RIGHT_BRACE:   ParseRule(None,      None,   Precedence.NONE       ),
 
     TokenType.PLUS:          ParseRule(None,      binary, Precedence.TERM       ),
     TokenType.MINUS:         ParseRule(unary,     binary, Precedence.TERM       ),
@@ -424,11 +468,11 @@ ParseRules = {
     TokenType.NOT_EQUAL:     ParseRule(None,      binary, Precedence.EQUALITY   ),
 
     TokenType.INTEGER:       ParseRule(integer,   None,   Precedence.NONE       ),
-    TokenType.FLOAT:         ParseRule(float_,    None,   Precedence.NONE       ),
-    TokenType.COMPLEX:       ParseRule(complex_,  None,   Precedence.NONE       ),
+    TokenType.FLOAT:         ParseRule(_float,    None,   Precedence.NONE       ),
+    TokenType.COMPLEX:       ParseRule(_complex,  None,   Precedence.NONE       ),
     TokenType.TRUE:          ParseRule(literal,   None,   Precedence.NONE       ),
     TokenType.FALSE:         ParseRule(literal,   None,   Precedence.NONE       ),
-    TokenType.IDENTIFIER:    ParseRule(variable,      None,   Precedence.NONE       ),
+    TokenType.IDENTIFIER:    ParseRule(variable,  None,   Precedence.NONE       ),
 
     TokenType.IF:            ParseRule(None,      None,   Precedence.NONE       ),
     TokenType.ELSE:          ParseRule(None,      None,   Precedence.NONE       ),
