@@ -2,7 +2,7 @@ from enum import Enum, auto
 from typing import TYPE_CHECKING, Any
 
 from slug2.chunk import Code, Op
-from slug2.common import PythonNumber, ConstantIndex, LocalIndex, JumpDistance
+from slug2.common import ConstantIndex, JumpDistance, LocalIndex, PythonNumber
 from slug2.object import ObjFunction
 
 if TYPE_CHECKING:
@@ -82,7 +82,7 @@ class VM:
 
         while len(self.stack) > 0:
             ip_index, instruction = read_byte()
-            
+
             if __debug__:
                 print(f"\nSTACK :inst {instruction}")
                 for item in self.stack:
@@ -154,7 +154,6 @@ class VM:
                         raise RuntimeError("assert only works with bools")
                     if not test:
                         raise AssertionError("assert failed")
-                    self.stack.append(Op.NOOP)
                 case Op.PRINT:
                     print(f"Printing from Slug2: {self.stack.pop()}")
                 case Op.JUMP:
@@ -198,10 +197,11 @@ class VM:
         maybe_func = self.compile(source)
         if maybe_func is None:
             return InterpretResult.COMPLE_ERROR
-        
+
         print(maybe_func.chunk)
         print(maybe_func.chunk.constants)
         from slug2 import vm
+
         print(vm.frames)
 
         maybe_func.name = "SCRIPT"

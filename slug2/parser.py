@@ -1,8 +1,8 @@
 from enum import IntEnum, auto
 from typing import TYPE_CHECKING, Any, Callable, NewType, cast
 
-from slug2.common import ConstantIndex, JumpDistance, LocalIndex
 from slug2.chunk import Chunk, Code, Op
+from slug2.common import ConstantIndex, JumpDistance, LocalIndex
 from slug2.token import Token, TokenType, tokenize
 
 if TYPE_CHECKING:
@@ -117,7 +117,6 @@ class Parser:
         if assignable and self.match(TokenType.EQUAL):
             raise ParseError("invalid assignment target")
 
-
     def expression(self, group: bool = False) -> None:
         self.parse_precedence(Precedence.ASSIGNMENT, group=group)
 
@@ -201,7 +200,7 @@ class Parser:
     def variable_declaration(self) -> None:
         if __debug__:
             print(f"variable_declaration on line {self.peek(0).line}")
-            
+
         compiler = current_compiler()
 
         constant_index = self.parse_variable(compiler, "expect variable name")
@@ -235,7 +234,7 @@ class Parser:
             print(f"named_variable :{name.literal} on line {self.peek(0).line}")
 
         compiler = current_compiler()
-        
+
         arg: LocalIndex | ConstantIndex | None
         if (arg := compiler.resolve_local(name)) is not None:
             get_op = Op.GET_LOCAL
@@ -244,7 +243,7 @@ class Parser:
             arg = identifier_constant(name)
             get_op = Op.GET_GLOBAL
             set_op = Op.SET_GLOBAL
-        
+
         if can_assign and self.match(TokenType.EQUAL):
             self.expression()
             emit_bytes(set_op, arg, name.line, name.line)
@@ -387,8 +386,7 @@ def literal(parser: Parser, _: bool) -> None:
             RuntimeError(f"unknown literal {tokentype}")
 
 
-def integer(
-    parser: Parser, _: bool) -> None:
+def integer(parser: Parser, _: bool) -> None:
     previous = parser.peek(-1)
 
     if __debug__:
@@ -397,14 +395,14 @@ def integer(
     emit_constant(previous.value, previous.line)
 
 
-
 def _float(parser: Parser, _: bool) -> None:
     previous = parser.peek(-1)
-    
+
     if __debug__:
         print(f"float: {previous} on line {previous.line}")
 
     emit_constant(previous.value, previous.line)
+
 
 def _complex(parser: Parser, _: bool) -> None:
     previous = parser.peek(-1)
@@ -413,6 +411,7 @@ def _complex(parser: Parser, _: bool) -> None:
         print(f"complex: {previous} on line {previous.line}")
 
     emit_constant(previous.value, previous.line)
+
 
 def grouping(parser: Parser, _: bool) -> None:
     parser.expression(group=True)

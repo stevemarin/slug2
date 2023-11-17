@@ -1,8 +1,8 @@
 from enum import Enum, auto
 from typing import Any
 
-from slug2.common import (ConstantIndex, LocalIndex, JumpDistance, PythonNumber,
-                          check_number)
+from slug2.common import (ConstantIndex, JumpDistance, LocalIndex,
+                          PythonNumber, check_number)
 
 
 class Op(Enum):
@@ -21,7 +21,7 @@ class Op(Enum):
     DEFINE_GLOBAL = auto()
     SET_GLOBAL = auto()
     GET_GLOBAL = auto()
-    
+
     GET_LOCAL = auto()
     SET_LOCAL = auto()
 
@@ -61,8 +61,9 @@ class Op(Enum):
     # INHERIT = auto()
     # METHOD = auto()
 
-
     def evaluate_binary(self, left: PythonNumber, right: PythonNumber) -> PythonNumber | bool:
+        print(left, right)
+
         if not check_number(left) or not check_number(right):
             raise RuntimeError("invalid number")
 

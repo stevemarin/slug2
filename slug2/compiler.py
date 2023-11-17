@@ -1,7 +1,7 @@
 from enum import Enum, auto
 
-from slug2.common import ConstantIndex, LocalIndex
 from slug2.chunk import Op
+from slug2.common import ConstantIndex, LocalIndex
 from slug2.object import ObjFunction
 from slug2.parser import Parser, emit_byte, emit_bytes, emit_return
 from slug2.token import Token, TokenType
@@ -23,7 +23,7 @@ class Local:
 
     def capture(self):
         self.captured = True
-    
+
     def __repr__(self) -> str:
         return f"<Local :name {self.name.literal} :depth {self.depth} :value {self.name.value}>"
 
@@ -70,15 +70,14 @@ class Compiler:
 
         local_idx = len(self.locals) - 1
         while local_idx >= 0 and self.locals[local_idx].depth > self.scope_depth:
-            
             if self.locals[local_idx].captured:
                 emit_byte(Op.CLOSE_UPVALUE, line)
             else:
                 emit_byte(Op.POP, line)
-            
+
             _ = self.locals.pop()
             local_idx -= 1
-            
+
     def add_local(self, name: Token) -> None:
         if len(self.locals) == __max_locals__:
             raise CompilerError("too many locals")
@@ -101,7 +100,7 @@ class Compiler:
     def mark_initialized(self) -> None:
         if self.scope_depth == 0:
             return
-            
+
         self.locals[len(self.locals) - 1].depth = self.scope_depth
 
     def define_variable(self, name: Token, global_index: ConstantIndex) -> None:
@@ -113,6 +112,7 @@ class Compiler:
             return
 
         from slug2.chunk import Op
+
         emit_bytes(Op.DEFINE_GLOBAL, global_index, name.line, name.line)
 
     def resolve_local(self, name: Token) -> None | LocalIndex:
