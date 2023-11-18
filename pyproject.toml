@@ -1,0 +1,20 @@
+[tool.poetry]
+name = "slug2"
+version = "0.1.0"
+description = "Simple & Stupd Python Compiler Based on Crafting Interpreters"
+authors = ["Steve Marin <steve.marin@gmail.com>"]
+license = "MIT"
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.12"
+
+[tool.poetry.group.dev.dependencies]
+ruff = "^0.1.2"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.black]
+line-length = 120
