@@ -14,4 +14,4 @@ black:
 
 test:
 	coverage run -m pytest .
-	coverage html
+	coverage html --omit=tests/*
