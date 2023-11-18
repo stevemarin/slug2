@@ -1,8 +1,7 @@
 from enum import Enum, auto
 from typing import Any
 
-from slug2.common import (ConstantIndex, JumpDistance, LocalIndex,
-                          PythonNumber, check_number)
+from slug2.common import ConstantIndex, JumpDistance, LocalIndex, PythonNumber, check_number
 
 
 class Op(Enum):
