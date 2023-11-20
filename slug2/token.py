@@ -115,6 +115,7 @@ class TokenType(Enum):
     WITH = "with"
     LET = "let"
     MUT = "mut"
+    FN = "fn"
 
     # types
     INTEGER = "integer"

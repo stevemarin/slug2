@@ -1,14 +1,11 @@
 from enum import Enum, auto
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-from slug2.chunk import Code, Op
-from slug2.common import ConstantIndex, JumpDistance, LocalIndex, PythonNumber
+from slug2.chunk import Chunk, Code, Op
+from slug2.common import CompilerError, ConstantIndex, FuncType, JumpDistance, LocalIndex, PythonNumber
+from slug2.compiler import Compiler
 from slug2.object import ObjFunction
-
-if TYPE_CHECKING:
-    from slug2.chunk import Chunk
-    from slug2.compiler import Compiler
-
+from slug2.parser import Parser
 
 __max_frames__ = 256
 
@@ -29,22 +26,22 @@ class CallFrame:
 
 
 class VM:
-    __slots__ = ("stack", "globals", "strings", "objects", "compilers", "frames")
+    __slots__ = ("stack", "globals", "strings", "objects", "parser", "compiler", "frames")
 
     def __init__(self) -> None:
         self.stack: list[Any] = list()
         self.globals: dict[str, Any] = {}
         self.strings: dict[str, str] = {}
         self.objects: list[Any] = list()
-        self.compilers: list["Compiler"] = list()
+        self.parser: Parser = Parser(self)
+        self.compiler: Compiler | None = Compiler(self, FuncType.SCRIPT)
         self.frames: list["CallFrame"] = list()
 
-    def current_compiler(self) -> "Compiler | None":
-        return self.compilers[-1] if len(self.compilers) > 0 else None
-
-    def current_chunk(self) -> "Chunk | None":
-        current_compiler = self.current_compiler()
-        return current_compiler.function.chunk if current_compiler else None
+    def current_chunk(self) -> "Chunk":
+        function = self.compiler.function if self.compiler else None
+        if function is None:
+            raise CompilerError("current function is None")
+        return function.chunk
 
     def peek(self, distance: int = 0) -> Any:
         return self.stack[-1 - distance]
@@ -169,6 +166,8 @@ class VM:
                         raise RuntimeError("only booleans are truthy")
                     if self.peek() is False:
                         ip_index += int(instruction)
+                case Op.CLOSURE:
+                    raise NotImplementedError()
                 case Op.RETURN:
                     result = self.stack.pop()
                     _ = self.frames.pop()
@@ -184,12 +183,10 @@ class VM:
         return InterpretResult.OK
 
     def compile(self, source: str) -> ObjFunction | None:
-        from slug2.compiler import Compiler, FuncType
-
-        root_compiler = Compiler(source, None, FuncType.SCRIPT)
-        self.compilers.append(root_compiler)
-        maybe_func = root_compiler.compile()
-        _ = self.compilers.pop()
+        self.parser = Parser(self, source)
+        self.compiler = Compiler(self, FuncType.SCRIPT)
+        maybe_func = self.compiler.compile()
+        # self.compiler = self.compiler.enclosing
 
         return maybe_func
 
@@ -200,9 +197,7 @@ class VM:
 
         print(maybe_func.chunk)
         print(maybe_func.chunk.constants)
-        from slug2 import vm
-
-        print(vm.frames)
+        print(self.frames)
 
         maybe_func.name = "SCRIPT"
         self.stack.append(maybe_func)

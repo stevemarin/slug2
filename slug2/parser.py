@@ -1,16 +1,13 @@
 from enum import IntEnum, auto
-from typing import TYPE_CHECKING, Any, Callable, NewType, cast
+from typing import TYPE_CHECKING, Callable, NewType, cast
 
-from slug2.chunk import Chunk, Code, Op
-from slug2.common import ConstantIndex, JumpDistance, LocalIndex
+from slug2.chunk import Op
+from slug2.common import CompilerError, ConstantIndex, FuncType, JumpDistance, LocalIndex, ParseError
+from slug2.compiler import Compiler
 from slug2.token import Token, TokenType, tokenize
 
 if TYPE_CHECKING:
-    from slug2.compiler import Compiler
-
-
-class ParseError(Exception):
-    pass
+    from slug2.vm import VM
 
 
 class Precedence(IntEnum):
@@ -36,9 +33,10 @@ class Precedence(IntEnum):
 
 
 class Parser:
-    __slots__ = ("tokens", "current_index", "had_error", "panic_mode")
+    __slots__ = ("vm", "tokens", "current_index", "had_error", "panic_mode")
 
-    def __init__(self, source: str | None = None) -> None:
+    def __init__(self, vm: "VM", source: str | None = None) -> None:
+        self.vm = vm
         self.tokens: list[Token] = [] if source is None else tokenize(source)
         self.current_index: int = -1
         self.had_error: bool = False
@@ -47,7 +45,7 @@ class Parser:
         if __debug__:
             print("TOKENS:")
             for t in self.tokens:
-                print(f"    {t}")
+                print(f"  {t}")
             print()
 
     def peek(self, distance: int = 0) -> Token:
@@ -122,36 +120,49 @@ class Parser:
 
     def expression_statement(self) -> None:
         self.expression()
-        emit_byte(Op.POP, self.peek(-1).line)
+        compiler = self.vm.compiler
+        if compiler is None:
+            raise CompilerError("compiler is None")
+        compiler.emit_byte(Op.POP)
 
     def assert_statement(self) -> None:
         self.expression()
-        emit_byte(Op.ASSERT, self.peek(-1).line)
+        compiler = self.vm.compiler
+        if compiler is None:
+            raise CompilerError("compiler is None")
+        compiler.emit_byte(Op.ASSERT)
 
     def print_statement(self):
         self.expression()
-        emit_byte(Op.PRINT, self.peek(-1).line)
+        compiler = self.vm.compiler
+        if compiler is None:
+            raise CompilerError("compiler is None")
+        compiler.emit_byte(Op.PRINT)
 
     def skip_newlines(self) -> None:
         while self.peek().tokentype == TokenType.NEWLINE:
             self.current_index += 1
 
     def if_statement(self) -> None:
+        compiler = self.vm.compiler
+        if compiler is None:
+            raise CompilerError("compiler is None")
+
         jumps_to_end: list[JumpDistance] = []
 
         while True:  # in if-statement right after the if
             self.expression()
             self.consume(TokenType.NEWLINE, "expect newline after if clause")
 
-            jump_to_next_clause = emit_jump(Op.JUMP_IF_FALSE, self.peek(-1).line)
-            emit_byte(Op.POP, self.peek(-1).line)
+            jump_to_next_clause = compiler.emit_jump(Op.JUMP_IF_FALSE)
+            compiler.emit_byte(Op.POP)
 
             self.block([TokenType.ELSE, TokenType.END])
 
-            jumps_to_end.append(emit_jump(Op.JUMP, self.peek(-1).line))
+            jumps_to_end.append(compiler.emit_jump(Op.JUMP))
 
-            patch_jump(jump_to_next_clause)
-            emit_byte(Op.POP, self.peek(-1).line)
+            compiler.patch_jump(jump_to_next_clause)
+            compiler.emit_byte(Op.POP)
 
             if self.match(TokenType.ELSE):  # consumes the else
                 if self.match(TokenType.IF):  # consumes the if
@@ -164,7 +175,7 @@ class Parser:
         self.consume(TokenType.END, "expect end after if block")
 
         for jump in jumps_to_end:
-            patch_jump(jump)
+            compiler.patch_jump(jump)
 
     def statement(self) -> None:
         if self.match(TokenType.NEWLINE):
@@ -176,7 +187,10 @@ class Parser:
         elif self.match(TokenType.IF):
             self.if_statement()
         elif self.match(TokenType.LEFT_BRACE):
-            compiler = current_compiler()
+            compiler = self.vm.compiler
+            if compiler is None:
+                raise CompilerError("compiler is None")
+
             compiler.begin_scope()
             self.block([TokenType.RIGHT_BRACE])
             self.consume(TokenType.RIGHT_BRACE, "no closing }")
@@ -184,7 +198,11 @@ class Parser:
         else:
             self.expression_statement()
 
-    def parse_variable(self, compiler: "Compiler", error_message: str) -> ConstantIndex:
+    def parse_variable(self, error_message: str) -> ConstantIndex:
+        compiler = self.vm.compiler
+        if compiler is None:
+            raise CompilerError("compiler is None")
+
         if __debug__:
             print(f"parse_variable on line {self.peek(0).line}")
 
@@ -195,17 +213,19 @@ class Parser:
         if compiler.scope_depth > 0:
             return ConstantIndex(0)
 
-        return identifier_constant(previous)
+        return compiler.identifier_constant(previous)
 
     def variable_declaration(self) -> None:
         if __debug__:
             print(f"variable_declaration on line {self.peek(0).line}")
 
-        compiler = current_compiler()
-
-        constant_index = self.parse_variable(compiler, "expect variable name")
+        constant_index = self.parse_variable("expect variable name")
         self.consume(TokenType.EQUAL, "expect = after variable name")
         self.expression()
+
+        compiler = self.vm.compiler
+        if compiler is None:
+            raise CompilerError("compiler is None")
 
         compiler.define_variable(self.peek(-1), constant_index)
 
@@ -215,9 +235,46 @@ class Parser:
                 print(f"  {local}")
             print()
 
+    def function(self, functype: FuncType) -> None:
+        if __debug__:
+            print(f"function :name {self.peek(-1).literal} :type {functype}")
+
+        compiler = Compiler(self.vm, functype)
+        self.vm.compiler = compiler
+        self.vm.compiler.begin_scope()
+
+        while not self.match(TokenType.EQUAL):
+            self.vm.compiler.function.arity += 1
+            if self.vm.compiler.function.arity > 255:
+                raise ParseError("can't have more than 255 parameters")
+            constant_index = self.parse_variable("expect parameter name")
+            self.vm.compiler.define_variable(self.peek(-1), constant_index)
+
+        self.consume(TokenType.LEFT_BRACE, "expect { after = in function declaration")
+        self.block([TokenType.RIGHT_BRACE])
+        self.consume(TokenType.RIGHT_BRACE, "expect } after function block")
+
+        function = self.vm.compiler.end()
+        self.vm.compiler.emit_bytes(Op.CLOSURE, self.vm.compiler.make_constant(function))
+
+    def function_declaration(self) -> None:
+        if __debug__:
+            print(f"function_declaration on line {self.peek(0).line}")
+
+        compiler = self.vm.compiler
+        if compiler is None:
+            raise CompilerError("compiler is None")
+
+        constant_index = self.parse_variable("expect function name")
+        compiler.mark_initialized()
+        self.function(FuncType.FUNCTION)
+        compiler.define_variable(self.peek(-1), constant_index)
+
     def declaration(self) -> None:
         if self.match(TokenType.LET):
             self.variable_declaration()
+        if self.match(TokenType.FN):
+            self.function_declaration()
         else:
             self.statement()
 
@@ -233,85 +290,24 @@ class Parser:
         if __debug__:
             print(f"named_variable :{name.literal} on line {self.peek(0).line}")
 
-        compiler = current_compiler()
+        compiler = self.vm.compiler
+        if compiler is None:
+            raise CompilerError("compiler is None")
 
         arg: LocalIndex | ConstantIndex | None
         if (arg := compiler.resolve_local(name)) is not None:
             get_op = Op.GET_LOCAL
             set_op = Op.SET_LOCAL
         else:
-            arg = identifier_constant(name)
+            arg = compiler.identifier_constant(name)
             get_op = Op.GET_GLOBAL
             set_op = Op.SET_GLOBAL
 
         if can_assign and self.match(TokenType.EQUAL):
             self.expression()
-            emit_bytes(set_op, arg, name.line, name.line)
+            compiler.emit_bytes(set_op, arg)
         else:
-            emit_bytes(get_op, arg, name.line, name.line)
-
-
-def current_compiler() -> "Compiler":
-    from slug2 import vm
-
-    compiler = vm.current_compiler()
-    if compiler is None:
-        raise RuntimeError("compiler is None")
-    return compiler
-
-
-def current_chunk() -> Chunk:
-    from slug2 import vm
-
-    chunk = vm.current_chunk()
-    if chunk is None:
-        raise RuntimeError("chunk is None")
-    return chunk
-
-
-def emit_byte(op: Code, line: int) -> None:
-    from slug2 import vm
-
-    chunk = vm.current_chunk()
-
-    if chunk is None:
-        raise ParseError("current_chunk is None")
-
-    chunk.write(op, line)
-
-
-def emit_bytes(op1: Op, op2: Code, line1: int, line2: int) -> None:
-    emit_byte(op1, line1)
-    emit_byte(op2, line2)
-
-
-def make_constant(value: Any) -> ConstantIndex:
-    chunk = current_chunk()
-    return chunk.add_constant(value)
-
-
-def identifier_constant(name: Token) -> ConstantIndex:
-    return make_constant(name.literal)
-
-
-def emit_constant(value: Any, line: int) -> None:
-    constant_index = make_constant(value)
-    emit_bytes(Op.CONSTANT, constant_index, line, line)
-
-
-def emit_return(line: int) -> None:
-    emit_bytes(Op.TRUE, Op.RETURN, line, line)
-
-
-def emit_jump(op: Op, line: int) -> JumpDistance:
-    emit_byte(op, line)
-    emit_byte(Op.JUMP_FAKE, line)
-    return JumpDistance(len(current_chunk().code) - 1)
-
-
-def patch_jump(offset: JumpDistance):
-    chunk = current_chunk()
-    chunk.code[offset] = JumpDistance(len(chunk.code) - offset - 1)
+            compiler.emit_bytes(get_op, arg)
 
 
 def binary(parser: Parser, _: bool) -> None:
@@ -324,31 +320,35 @@ def binary(parser: Parser, _: bool) -> None:
     if __debug__:
         print(f"binary: {previous} on line {line}")
 
+    compiler = parser.vm.compiler
+    if compiler is None:
+        raise CompilerError("compiler is None")
+
     match operator_type:
         case TokenType.PLUS:
-            emit_byte(Op.ADD, line)
+            compiler.emit_byte(Op.ADD)
         case TokenType.MINUS:
-            emit_byte(Op.SUBTRACT, line)
+            compiler.emit_byte(Op.SUBTRACT)
         case TokenType.STAR:
-            emit_byte(Op.MULTIPLY, line)
+            compiler.emit_byte(Op.MULTIPLY)
         case TokenType.STAR_STAR:
-            emit_byte(Op.EXPONENT, line)
+            compiler.emit_byte(Op.EXPONENT)
         case TokenType.SLASH:
-            emit_byte(Op.DIVIDE, line)
+            compiler.emit_byte(Op.DIVIDE)
         case TokenType.SLASH_SLASH:
-            emit_byte(Op.INT_DIVIDE, line)
+            compiler.emit_byte(Op.INT_DIVIDE)
         case TokenType.LESS:
-            emit_byte(Op.LESS, line)
+            compiler.emit_byte(Op.LESS)
         case TokenType.LESS_EQUAL:
-            emit_byte(Op.LESS_EQUAL, line)
+            compiler.emit_byte(Op.LESS_EQUAL)
         case TokenType.GREATER:
-            emit_byte(Op.GREATER, line)
+            compiler.emit_byte(Op.GREATER)
         case TokenType.GREATER_EQUAL:
-            emit_byte(Op.GREATER_EQUAL, line)
+            compiler.emit_byte(Op.GREATER_EQUAL)
         case TokenType.EQUAL_EQUAL:
-            emit_byte(Op.VALUE_EQUAL, line)
+            compiler.emit_byte(Op.VALUE_EQUAL)
         case TokenType.NOT_EQUAL:
-            emit_byte(Op.NOT_VALUE_EQUAL, line)
+            compiler.emit_byte(Op.NOT_VALUE_EQUAL)
         case _:
             raise ValueError("unknown binary operator")
 
@@ -358,6 +358,10 @@ def unary(parser: Parser, _: bool) -> None:
     operator_type: TokenType = previous.tokentype
     line = previous.line
 
+    compiler = parser.vm.compiler
+    if compiler is None:
+        raise CompilerError("compiler is None")
+
     if __debug__:
         print(f"unary: {previous} on line {line}")
 
@@ -365,23 +369,26 @@ def unary(parser: Parser, _: bool) -> None:
 
     match operator_type:
         case TokenType.MINUS:
-            emit_byte(Op.NEGATE, line)
+            compiler.emit_byte(Op.NEGATE)
         case _:
             raise ValueError("unknown unary operator")
 
 
 def literal(parser: Parser, _: bool) -> None:
     previous = parser.peek(-1)
-    line = previous.line
 
     if __debug__:
         print(f"literal: {previous.value} on line {previous.line}")
 
+    compiler = parser.vm.compiler
+    if compiler is None:
+        raise CompilerError("compiler is None")
+
     match tokentype := previous.tokentype:
         case TokenType.TRUE:
-            emit_byte(Op.TRUE, line)
+            compiler.emit_byte(Op.TRUE)
         case TokenType.FALSE:
-            emit_byte(Op.FALSE, line)
+            compiler.emit_byte(Op.FALSE)
         case _:
             RuntimeError(f"unknown literal {tokentype}")
 
@@ -392,7 +399,11 @@ def integer(parser: Parser, _: bool) -> None:
     if __debug__:
         print(f"integer: {previous} on line {previous.line}")
 
-    emit_constant(previous.value, previous.line)
+    compiler = parser.vm.compiler
+    if compiler is None:
+        raise CompilerError("compiler is None")
+
+    compiler.emit_constant(previous.value)
 
 
 def _float(parser: Parser, _: bool) -> None:
@@ -401,7 +412,11 @@ def _float(parser: Parser, _: bool) -> None:
     if __debug__:
         print(f"float: {previous} on line {previous.line}")
 
-    emit_constant(previous.value, previous.line)
+    compiler = parser.vm.compiler
+    if compiler is None:
+        raise CompilerError("compiler is None")
+
+    compiler.emit_constant(previous.value)
 
 
 def _complex(parser: Parser, _: bool) -> None:
@@ -410,7 +425,11 @@ def _complex(parser: Parser, _: bool) -> None:
     if __debug__:
         print(f"complex: {previous} on line {previous.line}")
 
-    emit_constant(previous.value, previous.line)
+    compiler = parser.vm.compiler
+    if compiler is None:
+        raise CompilerError("compiler is None")
+
+    compiler.emit_constant(previous.value)
 
 
 def grouping(parser: Parser, _: bool) -> None:

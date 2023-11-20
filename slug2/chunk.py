@@ -56,6 +56,7 @@ class Op(Enum):
     RETURN = auto()
     ASSERT = auto()
     PRINT = auto()
+    CLOSURE = ()
     # CLASS = auto()
     # INHERIT = auto()
     # METHOD = auto()
