@@ -1,14 +1,27 @@
 from typing import TYPE_CHECKING, Any
 
-from slug2.chunk import Code, JumpDistance, Op
-from slug2.common import CompilerError, ConstantIndex, FuncType, LocalIndex
-from slug2.object import ObjFunction
+from slug2.common import (
+    UINT8_MAX,
+    Code,
+    CompilerError,
+    ConstantIndex,
+    FuncType,
+    JumpDistance,
+    LocalIndex,
+    Op,
+    UpvalueIndex,
+)
+from slug2.object import ObjFunction, ObjType
 from slug2.token import Token, TokenType
-
-__max_locals__ = 256
 
 if TYPE_CHECKING:
     from slug2.vm import VM
+
+
+class Upvalue:
+    def __init__(self, index: LocalIndex | UpvalueIndex, is_local: bool):
+        self.index = index
+        self.is_local = is_local
 
 
 class Local:
@@ -19,35 +32,50 @@ class Local:
         self.depth: int = -1
         self.captured: bool = False
 
-    def capture(self):
-        self.captured = True
-
     def __repr__(self) -> str:
         return f"<Local :name {self.name.literal} :depth {self.depth} :value {self.name.value}>"
 
 
 class Compiler:
-    __slots__ = ("vm", "enclosing", "functype", "function", "scope_depth", "locals")
+    __slots__ = (
+        "vm",
+        "enclosing",
+        "functype",
+        "function",
+        "scope_depth",
+        "num_locals",
+        "locals",
+        "num_upvalues",
+        "upvalues",
+    )
 
-    def __init__(self, vm: "VM", functype: FuncType, root: bool = False):
+    def __init__(self, vm: "VM", functype: FuncType):
         self.vm: "VM" = vm
+        self.functype = functype
+        self.scope_depth: int = 0
+        self.num_locals: int = 0
+        self.locals: list["Local | None"] = [None] * UINT8_MAX
+        self.num_upvalues: int = 0
+        self.upvalues: list["Upvalue | None"] = [None] * UINT8_MAX
 
         try:
             self.enclosing: "Compiler | None" = vm.compiler
         except AttributeError:
-            self.enclosing = None
+            self.enclosing = None  # root compiler
 
-        self.functype = functype
-        self.function: ObjFunction = ObjFunction()
-        self.scope_depth: int = 0
-        self.locals: list[Local] = []
+        vm.compiler = self
+        self.function: ObjFunction = ObjFunction(vm, ObjType.FUNCTION, functype)
 
         if functype != FuncType.SCRIPT:
-            name = self.vm.parser.peek(-1)
-        else:
-            name = Token(TokenType.IDENTIFIER, "SCRIPT", None, 0, 0)
+            self.function.name = self.vm.parser.peek(-1).literal
 
-        self.locals.append(Local(name))
+        if functype == FuncType.FUNCTION:
+            name = Token(TokenType.IDENTIFIER, "this", None, 0, 0)
+        else:
+            name = Token(TokenType.IDENTIFIER, "", None, 0, 0)
+
+        self.locals[self.num_locals] = Local(name)
+        self.num_locals += 1
 
     def compile(self) -> ObjFunction | None:
         self.vm.parser.current_index += 1
@@ -56,7 +84,7 @@ class Compiler:
 
         return None if self.vm.parser.had_error else self.end()
 
-    def end(self) -> ObjFunction | None:
+    def end(self) -> ObjFunction:
         self.emit_return()
         function = self.function
 
@@ -67,31 +95,75 @@ class Compiler:
     def begin_scope(self):
         self.scope_depth += 1
 
-    def end_scope(self, line: int):
+    def end_scope(self):
         self.scope_depth -= 1
 
-        local_idx = len(self.locals) - 1
-        while local_idx >= 0 and self.locals[local_idx].depth > self.scope_depth:
-            if self.locals[local_idx].captured:
+        while self.num_locals > 0:
+            local = self.locals[self.num_locals - 1]
+            if local is None:
+                raise RuntimeError("ending scope - local is None")
+            elif local.depth <= self.scope_depth:
+                break
+            elif local.captured:
                 self.emit_byte(Op.CLOSE_UPVALUE)
             else:
                 self.emit_byte(Op.POP)
 
-            _ = self.locals.pop()
-            local_idx -= 1
+            self.num_locals -= 1
+
+    def add_upvalue(self, index: LocalIndex | UpvalueIndex, is_local: bool) -> UpvalueIndex:
+        upvalue_count = self.function.upvalue_count
+
+        for idx in range(upvalue_count):
+            upvalue = self.upvalues[idx]
+            if upvalue is None:
+                raise RuntimeError("upvalue is None")
+
+            if upvalue.index == index and upvalue.is_local == is_local:
+                return UpvalueIndex(idx)
+
+        if upvalue_count == UINT8_MAX:
+            raise CompilerError("too many closure variables in function")
+
+        self.upvalues[upvalue_count] = Upvalue(index, is_local)
+        self.function.upvalue_count += 1
+        return UpvalueIndex(self.function.upvalue_count)
+
+    def resolve_upvalue(self, name: Token) -> UpvalueIndex | None:
+        if self.enclosing is None:
+            return None
+        else:
+            enclosing = self.enclosing
+
+        local_index = enclosing.resolve_local(name)
+        if local_index is not None:
+            local = enclosing.locals[local_index]
+            if local is not None:
+                local.captured = True
+                return self.add_upvalue(local_index, True)
+
+        upvalue = enclosing.resolve_upvalue(name)
+        if upvalue is not None:
+            return self.add_upvalue(upvalue, False)
+
+        return None
 
     def add_local(self, name: Token) -> None:
-        if len(self.locals) == __max_locals__:
+        if self.num_locals == UINT8_MAX:
             raise CompilerError("too many locals")
 
-        self.locals.append(Local(name))
+        self.locals[self.num_locals] = Local(name)
+        self.num_locals += 1
 
     def declare_variable(self, name: Token):
         if self.scope_depth == 0:
             return
 
-        for local in reversed(self.locals):
-            if local.depth != -1 and local.depth < self.scope_depth:
+        for idx in range(self.num_locals - 1, -1, -1):
+            local = self.locals[idx]
+            if local is None:
+                continue
+            elif local.depth != -1 and local.depth < self.scope_depth:
                 break
 
             if name.literal == local.name.literal:
@@ -103,7 +175,11 @@ class Compiler:
         if self.scope_depth == 0:
             return
 
-        self.locals[len(self.locals) - 1].depth = self.scope_depth
+        local = self.locals[self.num_locals - 1]
+        if local is None:
+            raise RuntimeError("local is none")
+        else:
+            local.depth = self.scope_depth
 
     def define_variable(self, name: Token, global_index: ConstantIndex) -> None:
         if __debug__:
@@ -116,18 +192,25 @@ class Compiler:
         self.emit_bytes(Op.DEFINE_GLOBAL, global_index)
 
     def resolve_local(self, name: Token) -> None | LocalIndex:
-        for idx, local in enumerate(reversed(self.locals)):
-            if name.literal == local.name.literal:
+        for idx in range(self.num_locals - 1, -1, -1):
+            print("\t -> idx", idx)
+            local = self.locals[idx]
+            if local is None:
+                raise RuntimeError("cannot resolve local - local is None")
+            elif name.literal == local.name.literal:
                 if local.depth == -1:
                     raise CompilerError("cannot use local variable in own initializer")
-                # TODO reconsider this index
-                return LocalIndex(len(self.locals) - 1 - idx)
+                return LocalIndex(idx)
         return None
 
     def emit_byte(self, op: Code) -> None:
         self.function.chunk.write(op, self.vm.parser.peek(-1).line)
 
     def emit_bytes(self, op1: Op, op2: Code) -> None:
+        self.emit_byte(op1)
+        self.emit_byte(op2)
+
+    def emit_upvalue(self, op1: bool, op2: LocalIndex | UpvalueIndex) -> None:
         self.emit_byte(op1)
         self.emit_byte(op2)
 
@@ -145,7 +228,12 @@ class Compiler:
         self.emit_bytes(Op.CONSTANT, constant_index)
 
     def emit_return(self) -> None:
-        self.emit_bytes(Op.TRUE, Op.RETURN)
+        if self.function.functype == FuncType.INITIALIZER:
+            self.emit_bytes(Op.GET_LOCAL, ConstantIndex(0))
+        else:
+            self.emit_byte(Op.NONE)
+
+        self.emit_byte(Op.RETURN)
 
     def emit_jump(self, op: Op) -> JumpDistance:
         self.emit_byte(op)

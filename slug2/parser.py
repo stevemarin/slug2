@@ -1,8 +1,17 @@
 from enum import IntEnum, auto
 from typing import TYPE_CHECKING, Callable, NewType, cast
 
-from slug2.chunk import Op
-from slug2.common import CompilerError, ConstantIndex, FuncType, JumpDistance, LocalIndex, ParseError
+from slug2.common import (
+    CompilerError,
+    ConstantIndex,
+    FuncType,
+    JumpDistance,
+    LocalIndex,
+    NumArgs,
+    Op,
+    ParseError,
+    UpvalueIndex,
+)
 from slug2.compiler import Compiler
 from slug2.token import Token, TokenType, tokenize
 
@@ -70,6 +79,19 @@ class Parser:
     def consume(self, tokentype: TokenType, msg: str) -> None:
         if not self.match(tokentype):
             raise ParseError(msg)
+
+    def argument_list(self) -> int:
+        arg_count = 0
+        if not self.check(TokenType.RIGHT_PAREN):
+            self.expression()
+            arg_count += 1
+            while self.match(TokenType.COMMA):
+                self.expression()
+                if self.argument_list == 255:
+                    raise ParseError("cannot have more than 255 arguments")
+                arg_count += 1
+        self.consume(TokenType.RIGHT_PAREN, "expect ) after arguments")
+        return arg_count
 
     def strip_current_newlines(self) -> None:
         strip: int = 0
@@ -177,6 +199,23 @@ class Parser:
         for jump in jumps_to_end:
             compiler.patch_jump(jump)
 
+    def return_statement(self) -> None:
+        compiler = self.vm.compiler
+        if compiler is None:
+            raise ParseError("compiler is None")
+
+        if compiler.function.functype == FuncType.SCRIPT:
+            raise ParseError("cannot return from top-level code")
+
+        if self.match(TokenType.NEWLINE):
+            compiler.emit_return()
+        else:
+            if compiler.function.functype == FuncType.INITIALIZER:
+                raise ParseError("cannot return from an initializer")
+            self.expression()
+            self.consume(TokenType.NEWLINE, "expect newline after return")
+            compiler.emit_byte(Op.RETURN)
+
     def statement(self) -> None:
         if self.match(TokenType.NEWLINE):
             pass
@@ -190,11 +229,12 @@ class Parser:
             compiler = self.vm.compiler
             if compiler is None:
                 raise CompilerError("compiler is None")
-
             compiler.begin_scope()
             self.block([TokenType.RIGHT_BRACE])
             self.consume(TokenType.RIGHT_BRACE, "no closing }")
-            compiler.end_scope(self.peek(-1).line)
+            compiler.end_scope()
+        elif self.match(TokenType.RETURN):
+            self.return_statement()
         else:
             self.expression_statement()
 
@@ -231,17 +271,21 @@ class Parser:
 
         if __debug__:
             print("\nLOCALS:")
-            for local in compiler.locals:
-                print(f"  {local}")
+            for idx, local in enumerate(compiler.locals):
+                if local is not None:
+                    print(f"  {idx} -> {local}")
             print()
 
     def function(self, functype: FuncType) -> None:
+        name: str = self.peek(-1).literal
+
         if __debug__:
             print(f"function :name {self.peek(-1).literal} :type {functype}")
 
         compiler = Compiler(self.vm, functype)
         self.vm.compiler = compiler
         self.vm.compiler.begin_scope()
+        self.vm.compiler.function.name = name
 
         while not self.match(TokenType.EQUAL):
             self.vm.compiler.function.arity += 1
@@ -255,7 +299,16 @@ class Parser:
         self.consume(TokenType.RIGHT_BRACE, "expect } after function block")
 
         function = self.vm.compiler.end()
+
+        print("BBB", function)
+
         self.vm.compiler.emit_bytes(Op.CLOSURE, self.vm.compiler.make_constant(function))
+
+        for idx in range(function.upvalue_count):
+            upvalue = compiler.upvalues[idx]
+            if upvalue is None:
+                raise RuntimeError("unexpectedly None upvalue")
+            compiler.emit_upvalue(upvalue.is_local, upvalue.index)
 
     def function_declaration(self) -> None:
         if __debug__:
@@ -294,10 +347,13 @@ class Parser:
         if compiler is None:
             raise CompilerError("compiler is None")
 
-        arg: LocalIndex | ConstantIndex | None
+        arg: LocalIndex | ConstantIndex | UpvalueIndex | None
         if (arg := compiler.resolve_local(name)) is not None:
             get_op = Op.GET_LOCAL
             set_op = Op.SET_LOCAL
+        elif (arg := compiler.resolve_upvalue(name)) is not None:
+            get_op = Op.GET_UPVALUE
+            set_op = Op.SET_UPVALUE
         else:
             arg = compiler.identifier_constant(name)
             get_op = Op.GET_GLOBAL
@@ -447,7 +503,11 @@ def variable(parser: Parser, can_assign: bool) -> None:
 
 
 def call(parser: Parser, _: bool) -> None:
-    raise NotImplementedError
+    arg_count = parser.argument_list()
+    compiler = parser.vm.compiler
+    if compiler is None:
+        raise CompilerError("compiler is None")
+    compiler.emit_bytes(Op.CALL, NumArgs(arg_count))
 
 
 Assignable = NewType("Assignable", bool)
@@ -500,6 +560,7 @@ ParseRules = {
     TokenType.LET:           ParseRule(None,      None,   Precedence.NONE       ),
 
     TokenType.NEWLINE:       ParseRule(None,      None,   Precedence.NONE       ),
+    TokenType.COMMA:         ParseRule(None,      None,   Precedence.NONE       ),
 
     TokenType.EOF:           ParseRule(None,      None,   Precedence.NONE       ),
 

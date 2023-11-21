@@ -1,41 +1,74 @@
 # from enum import Enum, auto
-from typing import Any, Callable, NewType
+from abc import ABC
+from enum import Enum, auto
+from typing import TYPE_CHECKING
 
 from slug2.chunk import Chunk
+from slug2.common import FuncType, StackIndex
 
-# class ObjType(Enum):
-#     BOUND_METHOD = auto()
-#     CLASS = auto()
-#     CLOSURE = auto()
-#     FUNCTION = auto()
-#     INSTANCE = auto()
-#     NATIVE = auto()
-#     STRING = auto()
-#     UPVALUE = auto()
+if TYPE_CHECKING:
+    from slug2.vm import VM
 
 
-# class Obj:
-#     __slots__ = ("objtype", "next", "marked")
+class ObjType(Enum):
+    BOUND_METHOD = auto()
+    CLASS = auto()
+    CLOSURE = auto()
+    FUNCTION = auto()
+    INSTANCE = auto()
+    NATIVE = auto()
+    STRING = auto()
+    UPVALUE = auto()
 
-#     def __init__(self, objtype: ObjType, next: "Obj" | None):
-#         self.objtype = objtype
-#         self.next = next
-#         self.marked: bool = False
+
+class Obj(ABC):
+    __slots__ = ("marked", "objtype", "next")
+
+    def __init__(self, vm: "VM", objtype: ObjType):
+        self.marked: bool = False
+        self.objtype: ObjType = objtype
+        self.next = vm.objects
+        vm.objects = self
 
 
-class ObjFunction:
-    def __init__(self) -> None:
+class ObjFunction(Obj):
+    def __init__(self, vm: "VM", objtype: ObjType, functype: FuncType) -> None:
+        super().__init__(vm, objtype)
         self.arity: int = 0
+        self.upvalue_count: int = 0
         self.name: str = ""
         self.chunk = Chunk()
+        self.functype: FuncType = functype
 
     def __repr__(self) -> str:
-        return f"<func :name {self.name} :arity {self.arity}>"
+        return f"<ObjFunction :name {self.name} :arity {self.arity}>"
 
 
-NumArgs = NewType("NumArgs", int)
-Args = NewType("Args", list[Any])
-NativeFn = Callable[[NumArgs, Args], Any]
+class ObjUpvalue(Obj):
+    def __init__(self, vm: "VM", objtype: ObjType, stack_index: StackIndex):
+        super().__init__(vm, objtype)
+        self.closed = None
+        self.stack_index: StackIndex | None = stack_index
+        self.next_upvalue: "ObjUpvalue | None" = None
+
+    def __repr__(self) -> str:
+        return f"<ObjUpvalue :closed {self.closed} :location {self.stack_index}>"
+
+
+class ObjClosure(Obj):
+    def __init__(self, vm: "VM", objtype: ObjType, function: ObjFunction):
+        super().__init__(vm, objtype)
+        self.function = function
+        self.upvalue_count = function.upvalue_count
+        self.upvalues: list["ObjUpvalue | None"] = [None] * function.upvalue_count
+
+    def __repr__(self) -> str:
+        return f"<ObjClosure :function {self.function}>"
+
+
+# NumArgs = NewType("NumArgs", int)
+# Args = NewType("Args", list[Any])
+# NativeFn = Callable[[NumArgs, Args], Any]
 
 
 # class ObjNative:

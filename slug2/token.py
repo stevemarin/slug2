@@ -134,6 +134,7 @@ class TokenType(Enum):
     PRINT = "print"
 
     # other
+    RETURN = "return"
     IDENTIFIER = "identifier"
     EOF = "eof"
 
