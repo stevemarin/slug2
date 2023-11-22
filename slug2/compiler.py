@@ -23,6 +23,9 @@ class Upvalue:
         self.index = index
         self.is_local = is_local
 
+    def __repr__(self) -> str:
+        return f"<Upvalue :is_local {self.is_local} :value {self.index}>"
+
 
 class Local:
     __slots__ = ("name", "depth", "captured")
@@ -39,6 +42,7 @@ class Local:
 class Compiler:
     __slots__ = (
         "vm",
+        "name",
         "enclosing",
         "functype",
         "function",
@@ -49,8 +53,9 @@ class Compiler:
         "upvalues",
     )
 
-    def __init__(self, vm: "VM", functype: FuncType):
+    def __init__(self, vm: "VM", funcname: str, functype: FuncType):
         self.vm: "VM" = vm
+        self.name = funcname
         self.functype = functype
         self.scope_depth: int = 0
         self.num_locals: int = 0
@@ -88,7 +93,11 @@ class Compiler:
         self.emit_return()
         function = self.function
 
-        self.vm.compiler = self.vm.compiler.enclosing if self.vm.compiler else None
+        if self.enclosing is not None:
+            self.vm.compiler = self.enclosing
+        else:
+            # TODO what to do when enclosing is None, just for root?
+            self.vm.compiler = Compiler(self.vm, "", FuncType.NONE)
 
         return function
 
@@ -112,37 +121,37 @@ class Compiler:
             self.num_locals -= 1
 
     def add_upvalue(self, index: LocalIndex | UpvalueIndex, is_local: bool) -> UpvalueIndex:
-        upvalue_count = self.function.upvalue_count
+        # TODO remove bool and just use type of index
+        print("ADDING UPVALUE:", self.function.num_upvalues, index, is_local)
 
-        for idx in range(upvalue_count):
+        for idx, upvalue in enumerate(self.upvalues):
             upvalue = self.upvalues[idx]
             if upvalue is None:
-                raise RuntimeError("upvalue is None")
-
-            if upvalue.index == index and upvalue.is_local == is_local:
+                break
+            elif upvalue.index == index and upvalue.is_local == is_local:
                 return UpvalueIndex(idx)
 
-        if upvalue_count == UINT8_MAX:
+        if self.function.num_upvalues == UINT8_MAX:
             raise CompilerError("too many closure variables in function")
 
-        self.upvalues[upvalue_count] = Upvalue(index, is_local)
-        self.function.upvalue_count += 1
-        return UpvalueIndex(self.function.upvalue_count)
+        self.upvalues[self.function.num_upvalues] = Upvalue(index, is_local)
+        self.function.num_upvalues += 1
+        print("NUM_UPVALUES:", self.function.num_upvalues, self.upvalues[self.function.num_upvalues-1])
+        return UpvalueIndex(self.function.num_upvalues - 1)
 
     def resolve_upvalue(self, name: Token) -> UpvalueIndex | None:
         if self.enclosing is None:
             return None
-        else:
-            enclosing = self.enclosing
 
-        local_index = enclosing.resolve_local(name)
+        local_index = self.enclosing.resolve_local(name)
         if local_index is not None:
-            local = enclosing.locals[local_index]
-            if local is not None:
-                local.captured = True
-                return self.add_upvalue(local_index, True)
+            local = self.enclosing.locals[local_index]
+            if local is None:
+                raise RuntimeError("local is none")
+            local.captured = True
+            return self.add_upvalue(local_index, True)
 
-        upvalue = enclosing.resolve_upvalue(name)
+        upvalue = self.enclosing.resolve_upvalue(name)
         if upvalue is not None:
             return self.add_upvalue(upvalue, False)
 
@@ -181,9 +190,10 @@ class Compiler:
         else:
             local.depth = self.scope_depth
 
-    def define_variable(self, name: Token, global_index: ConstantIndex) -> None:
+    def define_variable(self, global_index: ConstantIndex) -> None:
         if __debug__:
-            print("define_variable", self.locals, self.scope_depth)
+            assert all([_ is None for _ in self.locals[self.num_locals:]])
+            print("define_variable", self.locals[self.num_locals], self.scope_depth)
 
         if self.scope_depth > 0:
             self.mark_initialized()

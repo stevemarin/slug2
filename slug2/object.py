@@ -35,7 +35,7 @@ class ObjFunction(Obj):
     def __init__(self, vm: "VM", objtype: ObjType, functype: FuncType) -> None:
         super().__init__(vm, objtype)
         self.arity: int = 0
-        self.upvalue_count: int = 0
+        self.num_upvalues: int = 0
         self.name: str = ""
         self.chunk = Chunk()
         self.functype: FuncType = functype
@@ -59,8 +59,7 @@ class ObjClosure(Obj):
     def __init__(self, vm: "VM", objtype: ObjType, function: ObjFunction):
         super().__init__(vm, objtype)
         self.function = function
-        self.upvalue_count = function.upvalue_count
-        self.upvalues: list["ObjUpvalue | None"] = [None] * function.upvalue_count
+        self.upvalues: list["ObjUpvalue | None"] = [None] * function.num_upvalues
 
     def __repr__(self) -> str:
         return f"<ObjClosure :function {self.function}>"

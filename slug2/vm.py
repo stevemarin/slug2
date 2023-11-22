@@ -2,11 +2,9 @@ from enum import Enum, auto
 from textwrap import dedent
 from typing import TYPE_CHECKING, Any
 
-from slug2.chunk import Chunk
 from slug2.common import (
     FRAMES_MAX,
     Code,
-    CompilerError,
     ConstantIndex,
     FuncType,
     JumpDistance,
@@ -15,6 +13,7 @@ from slug2.common import (
     Op,
     PythonNumber,
     StackIndex,
+    UpvalueIndex,
 )
 from slug2.compiler import Compiler
 from slug2.object import ObjClosure, ObjFunction, ObjType, ObjUpvalue
@@ -77,22 +76,14 @@ class VM:
 
     def __init__(self) -> None:
         self.frames: list["CallFrame"] = list()
-
         self.stack: list[Any] = list()
         self.globals: dict[str, Any] = {}
         self.strings: dict[str, str] = {}
         self.init_string = "init"
         self.open_upvalues: "ObjUpvalue | None" = None
-
         self.objects: "Obj | None" = None
         self.parser: Parser = Parser(self)
-        self.compiler: Compiler | None = Compiler(self, FuncType.SCRIPT)
-
-    def current_chunk(self) -> "Chunk":
-        function = self.compiler.function if self.compiler else None
-        if function is None:
-            raise CompilerError("current function is None")
-        return function.chunk
+        self.compiler: Compiler = Compiler(self, "SCRIPT", FuncType.SCRIPT)
 
     def peek(self, distance: int = 0) -> Any:
         return self.stack[-1 - distance]
@@ -136,8 +127,6 @@ class VM:
 
         if upvalue is not None and upvalue.stack_index == local:
             return upvalue
-
-        raise NotImplementedError
 
         created_upvalue = ObjUpvalue(self, ObjType.CLOSURE, local)
         created_upvalue.next = upvalue
@@ -244,9 +233,21 @@ class VM:
                         raise RuntimeError(f"global variable {name} not defined")
                     self.stack.append(self.globals[name])
                 case Op.SET_UPVALUE:
-                    slot = frame.read_byte()
-                    frame.closure.upvalues
-                    raise NotImplementedError
+                    upvalue_index = frame.read_byte()
+                    if not isinstance(upvalue_index, UpvalueIndex):
+                        raise RuntimeError(f"expexted UpvalueIndex, got:: {type(upvalue_index)}")
+                    upvalue = frame.closure.upvalues[upvalue_index]
+                    if not isinstance(upvalue, ObjUpvalue):
+                        raise RuntimeError(f"expected ObjUpvalue, got {type(upvalue)}")
+                    upvalue.stack_index = self.peek()
+                case Op.GET_UPVALUE:
+                    upvalue_index = frame.read_byte()
+                    if not isinstance(upvalue_index, UpvalueIndex):
+                        raise RuntimeError(f"expexted UpvalueIndex, got:: {type(upvalue_index)}")
+                    upvalue = frame.closure.upvalues[upvalue_index]
+                    if not isinstance(upvalue, ObjUpvalue):
+                        raise RuntimeError(f"expected ObjUpvalue, got {type(upvalue)}")
+                    self.stack.append(upvalue.stack_index)
                 case Op.ASSERT:
                     test = self.stack.pop()
                     if not isinstance(test, bool):
@@ -277,17 +278,27 @@ class VM:
                     frame = self.frames[-1]
                 case Op.CLOSURE:
                     function = frame.read_constant()
+                    if not isinstance(function, ObjFunction):
+                        raise RuntimeError(f"expected ObjFunction, got {type(function)}")
+
                     closure = ObjClosure(self, ObjType.CLOSURE, function)
                     self.stack.append(closure)
-                    for upvalue_index in range(closure.upvalue_count):
+                    for idx in range(closure.function.num_upvalues):
                         is_local = frame.read_byte()
+                        if not isinstance(is_local, bool):
+                            raise RuntimeError(f"expected bool, got {type(is_local)}, {is_local}")
+
                         index = frame.read_byte()
-                        if not isinstance(index, ConstantIndex):
+                        if not isinstance(index, LocalIndex | UpvalueIndex):
                             raise RuntimeError(f"expected ConstantIndex, got {type(index)}")
+
                         if is_local:
-                            closure.upvalues[upvalue_index] = self.capture_upvalue(frame.slots_start + index)
+                            closure.upvalues[idx] = self.capture_upvalue(frame.slots_start + index)
                         else:
-                            closure.upvalues[upvalue_index] = frame.closure.upvalues[index]
+                            closure.upvalues[idx] = frame.closure.upvalues[index]
+                case Op.CLOSE_UPVALUE:
+                    self.close_upvalue(StackIndex(len(self.stack) - 1))
+                    self.stack.pop()
                 case Op.RETURN:
                     result = self.stack.pop()
                     self.close_upvalue(frame.slots_start)
@@ -305,7 +316,7 @@ class VM:
 
     def compile(self, source: str) -> ObjFunction | None:
         self.parser = Parser(self, source)
-        self.compiler = Compiler(self, FuncType.SCRIPT)
+        # self.compiler = Compiler(self, FuncType.SCRIPT)
         maybe_func = self.compiler.compile()
         # self.compiler = self.compiler.enclosing
 

@@ -156,3 +156,4 @@ class FuncType(Enum):
     INITIALIZER = auto()
     METHOD = auto()
     SCRIPT = auto()
+    NONE = auto()
