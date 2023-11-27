@@ -2,7 +2,6 @@ from enum import IntEnum, auto
 from typing import TYPE_CHECKING, Callable, NewType, cast
 
 from slug2.common import (
-    CompilerError,
     ConstantIndex,
     FuncType,
     JumpDistance,
@@ -209,13 +208,10 @@ class Parser:
         elif self.match(TokenType.IF):
             self.if_statement()
         elif self.match(TokenType.LEFT_BRACE):
-            compiler = self.vm.compiler
-            if compiler is None:
-                raise CompilerError("compiler is None")
-            compiler.begin_scope()
+            self.vm.compiler.begin_scope()
             self.block([TokenType.RIGHT_BRACE])
             self.consume(TokenType.RIGHT_BRACE, "no closing }")
-            compiler.end_scope()
+            self.vm.compiler.end_scope()
         elif self.match(TokenType.RETURN):
             self.return_statement()
         else:
@@ -223,25 +219,28 @@ class Parser:
 
     def parse_variable(self, error_message: str) -> ConstantIndex:
         if __debug__:
-            print(f"parse_variable on line {self.peek(0).line}")
+            print(f"parse_variable {self.peek().literal} on line {self.peek().line}")
 
         self.consume(TokenType.IDENTIFIER, error_message)
-        previous = self.peek(-1)
 
-        self.vm.compiler.declare_variable(previous)
+        self.vm.compiler.declare_variable(self.peek(-1))
         if self.vm.compiler.scope_depth > 0:
             return ConstantIndex(0)
 
-        return self.vm.compiler.identifier_constant(previous)
+        return self.vm.compiler.identifier_constant(self.peek(-1))
 
     def variable_declaration(self) -> None:
         if __debug__:
             print(f"variable_declaration on line {self.peek(0).line}")
 
         constant_index = self.parse_variable("expect variable name")
-        self.consume(TokenType.EQUAL, "expect = after variable name")
-        self.expression()
 
+        if self.match(TokenType.EQUAL):
+            self.expression()
+        else:
+            raise ParseError("expect = after name variable declaration")
+
+        self.consume(TokenType.NEWLINE, "expect newline after variable declaration")
         self.vm.compiler.define_variable(constant_index)
 
         if __debug__:
@@ -278,7 +277,7 @@ class Parser:
             upvalue = self.vm.compiler.upvalues[idx]
             if upvalue is None:
                 print(function)
-                print("EMITTING UPALUE:", upvalue, idx)
+                print("aEMITTING UPALUE:", upvalue, idx)
                 print(self.vm.compiler.upvalues[:5])
 
                 raise RuntimeError("unexpectedly None upvalue")
@@ -312,7 +311,7 @@ class Parser:
 
     def named_variable(self, name: Token, can_assign: bool) -> None:
         if __debug__:
-            print(f"named_variable :{name.literal} on line {self.peek(0).line}")
+            print(f"-> entering named_variable :{name.literal} on line {self.peek(0).line}")
 
         arg: LocalIndex | ConstantIndex | UpvalueIndex | None
         if (arg := self.vm.compiler.resolve_local(name)) is not None:
@@ -326,11 +325,19 @@ class Parser:
             get_op = Op.GET_GLOBAL
             set_op = Op.SET_GLOBAL
 
+        print(self.tokens[self.current_index :])
+
+        op: Op
         if can_assign and self.match(TokenType.EQUAL):
             self.expression()
             self.vm.compiler.emit_bytes(set_op, arg)
+            op = set_op
         else:
             self.vm.compiler.emit_bytes(get_op, arg)
+            op = get_op
+
+        if __debug__:
+            print(f"<- leaving named_variable :ca {can_assign} :op {op} :arg {type(arg)} - {arg}")
 
 
 def binary(parser: Parser, _: bool) -> None:

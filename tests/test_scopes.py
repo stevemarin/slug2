@@ -1,4 +1,6 @@
-from slug2 import vm
+from slug2.vm import VM
+
+vm = VM()
 
 
 def test_scopes():

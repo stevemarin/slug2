@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, Any
 
 from slug2.common import (
     FRAMES_MAX,
+    UINT8_MAX,
     Code,
     ConstantIndex,
     FuncType,
@@ -13,7 +14,9 @@ from slug2.common import (
     Op,
     PythonNumber,
     StackIndex,
+    Uninitialized,
     UpvalueIndex,
+    uninitialized,
 )
 from slug2.compiler import Compiler
 from slug2.object import ObjClosure, ObjFunction, ObjType, ObjUpvalue
@@ -64,7 +67,9 @@ class CallFrame:
 class VM:
     __slots__ = (
         "frames",
+        "num_frames",
         "stack",
+        "stack_top",
         "globals",
         "strings",
         "init_string",
@@ -75,8 +80,12 @@ class VM:
     )
 
     def __init__(self) -> None:
-        self.frames: list["CallFrame"] = list()
-        self.stack: list[Any] = list()
+        self.frames: list["CallFrame | Uninitialized"] = [uninitialized] * UINT8_MAX
+        self.num_frames: int = 0
+
+        self.stack: list[Any] = [uninitialized] * UINT8_MAX
+        self.stack_top: int = 0
+
         self.globals: dict[str, Any] = {}
         self.strings: dict[str, str] = {}
         self.init_string = "init"
@@ -85,24 +94,38 @@ class VM:
         self.parser: Parser = Parser(self)
         self.compiler: Compiler = Compiler(self, "SCRIPT", FuncType.SCRIPT)
 
+    def push(self, value: Any) -> None:
+        assert not isinstance(value, Uninitialized)
+        self.stack[self.stack_top] = value
+        self.stack_top += 1
+
+    def pop(self) -> Any:
+        self.stack_top -= 1
+        value = self.stack[self.stack_top]
+        assert not isinstance(value, Uninitialized)
+
+        self.stack[self.stack_top] = uninitialized
+
+        return value
+
     def peek(self, distance: int = 0) -> Any:
-        return self.stack[-1 - distance]
+        return self.stack[self.stack_top - distance - 1]
 
     def call(self, closure: ObjClosure, num_args: int) -> bool:
         if num_args != closure.function.arity:
             raise RuntimeError(f"expected {closure.function.arity} arguments: got {num_args}")
 
-        if len(self.frames) == FRAMES_MAX:
+        if self.num_frames == FRAMES_MAX:
             raise RuntimeError("stack overflow")
 
-        frame = CallFrame(closure, closure.function.chunk.code, StackIndex(len(self.stack) - num_args - 1))
-        self.frames.append(frame)
+        frame = CallFrame(closure, closure.function.chunk.code, StackIndex(self.stack_top - num_args - 1))
+        self.frames[self.num_frames] = frame
+        self.num_frames += 1
 
         return True
 
     def call_value(self, num_args: int) -> bool:
         callee: Any = self.peek(num_args)
-        print("AAA", callee, num_args, type(callee))
         match callee.objtype:
             case ObjType.BOUND_METHOD:
                 raise NotImplementedError
@@ -156,36 +179,37 @@ class VM:
                 self.open_upvalues = upvalue.next_upvalue
 
     def run(self) -> InterpretResult:
-        frame = self.frames[-1]
+        frame = self.frames[self.num_frames - 1]
 
         def binary_op(op: Op) -> None:
-            right: PythonNumber = self.stack.pop()
-            left: PythonNumber = self.stack.pop()
-            self.stack.append(op.evaluate_binary(left, right))
+            right: PythonNumber = self.pop()
+            left: PythonNumber = self.pop()
+            self.push(op.evaluate_binary(left, right))
 
-        while len(self.stack) > 0:
+        while True:
+            assert not isinstance(frame, Uninitialized)
+            if frame.ip >= len(frame.instructions):
+                return InterpretResult.OK
+
             instruction = frame.read_byte()
 
             if __debug__:
-                print(f"\nSTACK :inst {instruction} :depth {len(self.frames)}")
-                for item in self.stack:
-                    print(f"  {type(item)}: {item}")
-                print()
+                print(self)
 
             if not isinstance(instruction, Op):
                 raise RuntimeError(f"instruction is {type(instruction)} not Op")
 
             match instruction:
                 case Op.CONSTANT:
-                    self.stack.append(frame.read_constant())
+                    self.push(frame.read_constant())
                 case Op.TRUE:
-                    self.stack.append(True)
+                    self.push(True)
                 case Op.FALSE:
-                    self.stack.append(False)
+                    self.push(False)
                 case Op.NONE:
-                    self.stack.append(None)
+                    self.push(None)
                 case Op.POP:
-                    self.stack.pop()
+                    self.pop()
                 case (
                     Op.ADD
                     | Op.SUBTRACT
@@ -201,7 +225,7 @@ class VM:
                 ):
                     binary_op(instruction)
                 case Op.NEGATE:
-                    self.stack[-1] *= -1
+                    self.stack[self.stack_top - 1] *= -1
                 case Op.SET_LOCAL:
                     slot = frame.read_byte()
                     if not isinstance(slot, LocalIndex):
@@ -211,13 +235,15 @@ class VM:
                     slot = frame.read_byte()
                     if not isinstance(slot, LocalIndex):
                         raise RuntimeError("expected SlotInstance")
-                    self.stack.append(self.stack[frame.slots_start + slot])
+                    self.push(self.stack[frame.slots_start + slot])
                 case Op.DEFINE_GLOBAL:
                     name = frame.read_constant()
                     if not isinstance(name, str):
                         raise RuntimeError("global name not string")
                     self.globals[name] = self.peek()
-                    _ = self.stack.pop()
+                    _ = self.pop()
+                    print("NAME:", name)
+                    print("Peek()", _)
                 case Op.SET_GLOBAL:
                     name = frame.read_constant()
                     if not isinstance(name, str):
@@ -227,35 +253,34 @@ class VM:
                     self.globals[name] = self.peek()
                 case Op.GET_GLOBAL:
                     name = frame.read_constant()
+                    print("NAME:", name)
+                    print("Globals:", self.globals)
                     if not isinstance(name, str):
                         raise RuntimeError("global name not string")
                     if name not in self.globals:
                         raise RuntimeError(f"global variable {name} not defined")
-                    self.stack.append(self.globals[name])
+                    self.push(self.globals[name])
                 case Op.SET_UPVALUE:
                     upvalue_index = frame.read_byte()
-                    if not isinstance(upvalue_index, UpvalueIndex):
-                        raise RuntimeError(f"expexted UpvalueIndex, got:: {type(upvalue_index)}")
+                    assert isinstance(upvalue_index, UpvalueIndex), type(upvalue_index)
                     upvalue = frame.closure.upvalues[upvalue_index]
-                    if not isinstance(upvalue, ObjUpvalue):
-                        raise RuntimeError(f"expected ObjUpvalue, got {type(upvalue)}")
+                    assert isinstance(upvalue, ObjUpvalue), type(upvalue)
                     upvalue.stack_index = self.peek()
                 case Op.GET_UPVALUE:
                     upvalue_index = frame.read_byte()
-                    if not isinstance(upvalue_index, UpvalueIndex):
-                        raise RuntimeError(f"expexted UpvalueIndex, got:: {type(upvalue_index)}")
+                    assert isinstance(upvalue_index, UpvalueIndex), type(upvalue_index)
+                    assert upvalue_index >= 0, upvalue_index
                     upvalue = frame.closure.upvalues[upvalue_index]
-                    if not isinstance(upvalue, ObjUpvalue):
-                        raise RuntimeError(f"expected ObjUpvalue, got {type(upvalue)}")
-                    self.stack.append(upvalue.stack_index)
+                    assert isinstance(upvalue, ObjUpvalue), type(upvalue)
+                    self.push(upvalue.stack_index)
                 case Op.ASSERT:
-                    test = self.stack.pop()
+                    test = self.pop()
                     if not isinstance(test, bool):
                         raise RuntimeError("assert only works with bools")
                     if not test:
                         raise AssertionError("assert failed")
                 case Op.PRINT:
-                    print(f"Printing from Slug2: {self.stack.pop()}")
+                    print(f"Printing from Slug2: {self.pop()}")
                 case Op.JUMP:
                     instruction = frame.read_byte()
                     if not isinstance(instruction, JumpDistance):
@@ -275,15 +300,15 @@ class VM:
                         raise RuntimeError(f"expected NumArgs. got {type(num_args)}")
                     if not self.call_value(num_args):
                         return InterpretResult.RUNTIME_ERROR
-                    frame = self.frames[-1]
+                    frame = self.frames[self.num_frames - 1]
                 case Op.CLOSURE:
                     function = frame.read_constant()
                     if not isinstance(function, ObjFunction):
                         raise RuntimeError(f"expected ObjFunction, got {type(function)}")
 
                     closure = ObjClosure(self, ObjType.CLOSURE, function)
-                    self.stack.append(closure)
-                    for idx in range(closure.function.num_upvalues):
+                    self.push(closure)
+                    for idx in range(closure.num_upvalues):
                         is_local = frame.read_byte()
                         if not isinstance(is_local, bool):
                             raise RuntimeError(f"expected bool, got {type(is_local)}, {is_local}")
@@ -297,22 +322,23 @@ class VM:
                         else:
                             closure.upvalues[idx] = frame.closure.upvalues[index]
                 case Op.CLOSE_UPVALUE:
-                    self.close_upvalue(StackIndex(len(self.stack) - 1))
-                    self.stack.pop()
+                    self.close_upvalue(StackIndex(self.stack_top - 1))
+                    _ = self.pop()
                 case Op.RETURN:
-                    result = self.stack.pop()
+                    result = self.pop()
                     self.close_upvalue(frame.slots_start)
-                    _ = self.frames.pop()
-                    if len(self.frames) == 0:
-                        _ = self.stack.pop()
+                    self.frames[self.num_frames - 1] = uninitialized
+                    self.num_frames -= 1
+
+                    if self.num_frames == 0:
+                        _ = self.pop()
                         return InterpretResult.OK
 
-                    self.stack.append(result)
-                    frame = self.frames[-1]
+                    self.stack_top = frame.slots_start
+                    self.push(result)
+                    frame = self.frames[self.num_frames - 1]
                 case _:
                     raise NotImplementedError(f"op {instruction} not implemented")
-
-        return InterpretResult.OK
 
     def compile(self, source: str) -> ObjFunction | None:
         self.parser = Parser(self, source)
@@ -326,21 +352,18 @@ class VM:
         maybe_func = self.compile(source)
         if maybe_func is None:
             return InterpretResult.COMPLE_ERROR
+
+        maybe_func.name = "SCRIPT"
         closure = ObjClosure(self, ObjType.CLOSURE, maybe_func)
 
-        print(closure.function.chunk)
-        print(closure.function.chunk.constants)
-        print(closure.function)
-        print(self.frames)
-
-        closure.function.name = "SCRIPT"
-        self.stack.append(closure)
+        self.push(closure)
         self.call(closure, 0)
 
         return self.run()
 
     def __repr__(self) -> str:
-        repr = "\nStack:\n"
-        for code in self.stack:
-            repr += str(code) + "\n"
+        max_idx = max([idx for idx, s in enumerate(self.stack) if not isinstance(s, Uninitialized)])
+        repr = f"\nStack :depth {self.num_frames}\n"
+        for item in self.stack[: max_idx + 1]:
+            repr += str(item) + "\n"
         return repr

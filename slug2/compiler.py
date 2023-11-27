@@ -107,28 +107,37 @@ class Compiler:
     def end_scope(self):
         self.scope_depth -= 1
 
+        assert len([_ for _ in self.locals if _ is not None]) == self.num_locals
+
         while self.num_locals > 0:
             local = self.locals[self.num_locals - 1]
-            if local is None:
-                raise RuntimeError("ending scope - local is None")
-            elif local.depth <= self.scope_depth:
+            assert local is not None
+
+            if not local.depth > self.scope_depth:
                 break
-            elif local.captured:
+
+            if local.captured:
                 self.emit_byte(Op.CLOSE_UPVALUE)
             else:
                 self.emit_byte(Op.POP)
 
+            self.locals[self.num_locals - 1] = None
             self.num_locals -= 1
+
+        assert len([x for x in self.locals if x is not None]) == self.num_locals
 
     def add_upvalue(self, index: LocalIndex | UpvalueIndex, is_local: bool) -> UpvalueIndex:
         # TODO remove bool and just use type of index
-        print("ADDING UPVALUE:", self.function.num_upvalues, index, is_local)
+        print("ADDING UPVALUE:", self.function, self.function.num_upvalues, index, is_local)
 
-        for idx, upvalue in enumerate(self.upvalues):
+        assert len([x for x in self.upvalues if x is not None]) == self.num_upvalues
+
+        for idx in range(self.function.num_upvalues):
             upvalue = self.upvalues[idx]
-            if upvalue is None:
-                break
-            elif upvalue.index == index and upvalue.is_local == is_local:
+
+            assert upvalue is not None
+
+            if upvalue.index == index and upvalue.is_local == is_local:
                 return UpvalueIndex(idx)
 
         if self.function.num_upvalues == UINT8_MAX:
@@ -136,8 +145,13 @@ class Compiler:
 
         self.upvalues[self.function.num_upvalues] = Upvalue(index, is_local)
         self.function.num_upvalues += 1
-        print("NUM_UPVALUES:", self.function.num_upvalues, self.upvalues[self.function.num_upvalues-1])
-        return UpvalueIndex(self.function.num_upvalues - 1)
+
+        print("NUM_UPVALUES:", self.function.num_upvalues, self.upvalues[self.function.num_upvalues - 1])
+
+        assert len([x for x in self.upvalues if x is not None]) == self.function.num_upvalues
+        assert len([x for x in self.locals if x is not None]) == self.num_locals
+
+        return UpvalueIndex(self.num_upvalues - 1)
 
     def resolve_upvalue(self, name: Token) -> UpvalueIndex | None:
         if self.enclosing is None:
@@ -146,14 +160,13 @@ class Compiler:
         local_index = self.enclosing.resolve_local(name)
         if local_index is not None:
             local = self.enclosing.locals[local_index]
-            if local is None:
-                raise RuntimeError("local is none")
+            assert local is not None
             local.captured = True
             return self.add_upvalue(local_index, True)
 
-        upvalue = self.enclosing.resolve_upvalue(name)
-        if upvalue is not None:
-            return self.add_upvalue(upvalue, False)
+        upvalue_index = self.enclosing.resolve_upvalue(name)
+        if upvalue_index is not None:
+            return self.add_upvalue(upvalue_index, False)
 
         return None
 
@@ -164,15 +177,19 @@ class Compiler:
         self.locals[self.num_locals] = Local(name)
         self.num_locals += 1
 
+        assert len([x for x in self.locals if x is not None]) == self.num_locals
+
     def declare_variable(self, name: Token):
         if self.scope_depth == 0:
             return
 
         for idx in range(self.num_locals - 1, -1, -1):
             local = self.locals[idx]
-            if local is None:
-                continue
-            elif local.depth != -1 and local.depth < self.scope_depth:
+
+            assert len([x for x in self.locals if x is not None]) == self.num_locals
+            assert local is not None
+
+            if local.depth != -1 and local.depth < self.scope_depth:
                 break
 
             if name.literal == local.name.literal:
@@ -185,15 +202,15 @@ class Compiler:
             return
 
         local = self.locals[self.num_locals - 1]
-        if local is None:
-            raise RuntimeError("local is none")
-        else:
-            local.depth = self.scope_depth
+        assert local is not None
+        local.depth = self.scope_depth
+
+        print("LOCAL.DEPTH", self.num_locals, self.locals)
 
     def define_variable(self, global_index: ConstantIndex) -> None:
         if __debug__:
-            assert all([_ is None for _ in self.locals[self.num_locals:]])
-            print("define_variable", self.locals[self.num_locals], self.scope_depth)
+            assert all([_ is None for _ in self.locals[self.num_locals :]])
+            print("define_variable", self.locals[self.num_locals - 1], self.scope_depth)
 
         if self.scope_depth > 0:
             self.mark_initialized()
@@ -205,12 +222,12 @@ class Compiler:
         for idx in range(self.num_locals - 1, -1, -1):
             print("\t -> idx", idx)
             local = self.locals[idx]
-            if local is None:
-                raise RuntimeError("cannot resolve local - local is None")
-            elif name.literal == local.name.literal:
+            assert local is not None
+            if local.name.literal == name.literal:
                 if local.depth == -1:
                     raise CompilerError("cannot use local variable in own initializer")
                 return LocalIndex(idx)
+
         return None
 
     def emit_byte(self, op: Code) -> None:
@@ -225,10 +242,11 @@ class Compiler:
         self.emit_byte(op2)
 
     def make_constant(self, value: Any) -> ConstantIndex:
-        chunk = self.vm.compiler.function.chunk if self.vm.compiler else None
-        if chunk is None:
-            raise CompilerError("chunk is None")
-        return chunk.add_constant(value)
+        constant_index = self.vm.compiler.function.chunk.add_constant(value)
+        if constant_index > UINT8_MAX:
+            raise CompilerError("too many constants in one chunk")
+
+        return constant_index
 
     def identifier_constant(self, name: Token) -> ConstantIndex:
         return self.make_constant(name.literal)

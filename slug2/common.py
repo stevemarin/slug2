@@ -3,6 +3,13 @@ from typing import Any
 
 PythonNumber = complex | float | int
 
+
+class Uninitialized:
+    pass
+
+
+uninitialized = Uninitialized()
+
 UINT8_MAX = 256
 FRAMES_MAX = 64
 STACK_MAX = FRAMES_MAX * UINT8_MAX

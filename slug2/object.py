@@ -4,7 +4,7 @@ from enum import Enum, auto
 from typing import TYPE_CHECKING
 
 from slug2.chunk import Chunk
-from slug2.common import FuncType, StackIndex
+from slug2.common import UINT8_MAX, FuncType, StackIndex
 
 if TYPE_CHECKING:
     from slug2.vm import VM
@@ -59,7 +59,8 @@ class ObjClosure(Obj):
     def __init__(self, vm: "VM", objtype: ObjType, function: ObjFunction):
         super().__init__(vm, objtype)
         self.function = function
-        self.upvalues: list["ObjUpvalue | None"] = [None] * function.num_upvalues
+        self.num_upvalues: int = function.num_upvalues
+        self.upvalues: list["ObjUpvalue | None"] = [None] * UINT8_MAX
 
     def __repr__(self) -> str:
         return f"<ObjClosure :function {self.function}>"
