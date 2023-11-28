@@ -1,7 +1,30 @@
+from contextlib import ContextDecorator
 from enum import Enum, auto
 from typing import Any
 
 PythonNumber = complex | float | int
+
+FUNCTION_DEPTH = 0
+
+
+class EntryExit(ContextDecorator):
+    def __init__(self, name: str):
+        self.name = name
+
+    def __enter__(self):
+        global FUNCTION_DEPTH
+        print(" " * FUNCTION_DEPTH + f"-> {self.name}")
+        FUNCTION_DEPTH += 1
+
+    def __exit__(self, exc_type, exc, exc_tb):
+        global FUNCTION_DEPTH
+        FUNCTION_DEPTH -= 1
+        print(" " * FUNCTION_DEPTH + f"<- {self.name}")
+
+
+def debug_print(msg):
+    global FUNCTION_DEPTH
+    print(" " * FUNCTION_DEPTH + "..." + msg)
 
 
 class Uninitialized:

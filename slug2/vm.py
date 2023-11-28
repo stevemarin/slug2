@@ -73,7 +73,7 @@ class VM:
         "globals",
         "strings",
         "init_string",
-        "open_upvalues",
+        "open_upvalue",
         "objects",
         "parser",
         "compiler",
@@ -89,10 +89,10 @@ class VM:
         self.globals: dict[str, Any] = {}
         self.strings: dict[str, str] = {}
         self.init_string = "init"
-        self.open_upvalues: "ObjUpvalue | None" = None
+        self.open_upvalue: "ObjUpvalue | None" = None
         self.objects: "Obj | None" = None
         self.parser: Parser = Parser(self)
-        self.compiler: Compiler = Compiler(self, "SCRIPT", FuncType.SCRIPT)
+        self.compiler: Compiler | None = Compiler(self, "SCRIPT", FuncType.SCRIPT)
 
     def push(self, value: Any) -> None:
         assert not isinstance(value, Uninitialized)
@@ -140,13 +140,10 @@ class VM:
 
     def capture_upvalue(self, local: Any) -> ObjUpvalue:
         prev_upvalue: ObjUpvalue | None = None
-        upvalue: ObjUpvalue | None = self.open_upvalues
+        upvalue: ObjUpvalue | None = self.open_upvalue
         while upvalue is not None and upvalue.stack_index > local:
             prev_upvalue = upvalue
-            if isinstance(upvalue.next, ObjUpvalue):
-                upvalue = upvalue.next
-            else:
-                raise RuntimeError(f"expected ObjUpvalue, got {type(upvalue.next)}")
+            upvalue = upvalue.next
 
         if upvalue is not None and upvalue.stack_index == local:
             return upvalue
@@ -155,28 +152,17 @@ class VM:
         created_upvalue.next = upvalue
 
         if prev_upvalue is None:
-            self.open_upvalues = created_upvalue
+            self.open_upvalue = created_upvalue
         else:
             prev_upvalue.next = created_upvalue
 
         return created_upvalue
 
     def close_upvalue(self, last: StackIndex) -> None:
-        while True:
-            upvalue = self.open_upvalues
-
-            if upvalue is None:
-                return
-            elif not isinstance(upvalue, ObjUpvalue):
-                raise RuntimeError("not an ObjUpvalue")
-            elif upvalue.stack_index is None:
-                raise RuntimeError("already closed")
-            elif upvalue.stack_index >= last:
-                return
-            else:
-                upvalue.closed = self.stack[upvalue.stack_index]
-                upvalue.stack_index = None
-                self.open_upvalues = upvalue.next_upvalue
+        while self.open_upvalue is not None and self.open_upvalue.stack_index >= last:
+            upvalue = self.open_upvalue
+            upvalue.closed = upvalue.stack_index
+            self.open_upvalue = upvalue.next
 
     def run(self) -> InterpretResult:
         frame = self.frames[self.num_frames - 1]
@@ -242,8 +228,6 @@ class VM:
                         raise RuntimeError("global name not string")
                     self.globals[name] = self.peek()
                     _ = self.pop()
-                    print("NAME:", name)
-                    print("Peek()", _)
                 case Op.SET_GLOBAL:
                     name = frame.read_constant()
                     if not isinstance(name, str):
@@ -253,8 +237,6 @@ class VM:
                     self.globals[name] = self.peek()
                 case Op.GET_GLOBAL:
                     name = frame.read_constant()
-                    print("NAME:", name)
-                    print("Globals:", self.globals)
                     if not isinstance(name, str):
                         raise RuntimeError("global name not string")
                     if name not in self.globals:
@@ -303,19 +285,16 @@ class VM:
                     frame = self.frames[self.num_frames - 1]
                 case Op.CLOSURE:
                     function = frame.read_constant()
-                    if not isinstance(function, ObjFunction):
-                        raise RuntimeError(f"expected ObjFunction, got {type(function)}")
+                    assert isinstance(function, ObjFunction)
 
                     closure = ObjClosure(self, ObjType.CLOSURE, function)
                     self.push(closure)
                     for idx in range(closure.num_upvalues):
                         is_local = frame.read_byte()
-                        if not isinstance(is_local, bool):
-                            raise RuntimeError(f"expected bool, got {type(is_local)}, {is_local}")
-
                         index = frame.read_byte()
-                        if not isinstance(index, LocalIndex | UpvalueIndex):
-                            raise RuntimeError(f"expected ConstantIndex, got {type(index)}")
+
+                        assert isinstance(is_local, bool)
+                        assert isinstance(index, LocalIndex | UpvalueIndex)
 
                         if is_local:
                             closure.upvalues[idx] = self.capture_upvalue(frame.slots_start + index)
@@ -343,6 +322,7 @@ class VM:
     def compile(self, source: str) -> ObjFunction | None:
         self.parser = Parser(self, source)
         # self.compiler = Compiler(self, FuncType.SCRIPT)
+        assert self.compiler is not None
         maybe_func = self.compiler.compile()
         # self.compiler = self.compiler.enclosing
 

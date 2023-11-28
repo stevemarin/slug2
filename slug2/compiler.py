@@ -5,11 +5,13 @@ from slug2.common import (
     Code,
     CompilerError,
     ConstantIndex,
+    EntryExit,
     FuncType,
     JumpDistance,
     LocalIndex,
     Op,
     UpvalueIndex,
+    debug_print,
 )
 from slug2.object import ObjFunction, ObjType
 from slug2.token import Token, TokenType
@@ -82,6 +84,13 @@ class Compiler:
         self.locals[self.num_locals] = Local(name)
         self.num_locals += 1
 
+    def print_upvalue(self, upvalue: Upvalue) -> None:
+        if upvalue.is_local:
+            debug_print(self.locals[upvalue.index])
+        else:
+            debug_print(self.vm.stack[self.vm.stack[upvalue.index]])
+
+    @EntryExit("Compiler.compile")
     def compile(self) -> ObjFunction | None:
         self.vm.parser.current_index += 1
         while not self.vm.parser.match(TokenType.EOF):
@@ -89,21 +98,18 @@ class Compiler:
 
         return None if self.vm.parser.had_error else self.end()
 
+    @EntryExit("Compiler.end")
     def end(self) -> ObjFunction:
         self.emit_return()
-        function = self.function
+        current_function = self.function
+        self.vm.compiler = self.enclosing
+        return current_function
 
-        if self.enclosing is not None:
-            self.vm.compiler = self.enclosing
-        else:
-            # TODO what to do when enclosing is None, just for root?
-            self.vm.compiler = Compiler(self.vm, "", FuncType.NONE)
-
-        return function
-
+    @EntryExit("Compiler.begin_scope")
     def begin_scope(self):
         self.scope_depth += 1
 
+    @EntryExit("Compiler.end_scope")
     def end_scope(self):
         self.scope_depth -= 1
 
@@ -121,16 +127,21 @@ class Compiler:
             else:
                 self.emit_byte(Op.POP)
 
+            # TODO do we need top set to none?  goes out of scope right after?
             self.locals[self.num_locals - 1] = None
             self.num_locals -= 1
 
         assert len([x for x in self.locals if x is not None]) == self.num_locals
 
+    @EntryExit("Compiler.add_upvalue")
     def add_upvalue(self, index: LocalIndex | UpvalueIndex, is_local: bool) -> UpvalueIndex:
         # TODO remove bool and just use type of index
-        print("ADDING UPVALUE:", self.function, self.function.num_upvalues, index, is_local)
-
         assert len([x for x in self.upvalues if x is not None]) == self.num_upvalues
+
+        debug_print(f"starting upvalues: {self.function.num_upvalues}")
+        for uv in self.upvalues[: self.function.num_upvalues]:
+            assert uv is not None
+            self.print_upvalue(uv)
 
         for idx in range(self.function.num_upvalues):
             upvalue = self.upvalues[idx]
@@ -143,18 +154,24 @@ class Compiler:
         if self.function.num_upvalues == UINT8_MAX:
             raise CompilerError("too many closure variables in function")
 
-        self.upvalues[self.function.num_upvalues] = Upvalue(index, is_local)
-        self.function.num_upvalues += 1
+        self.upvalues[self.num_upvalues] = Upvalue(index, is_local)
+        self.num_upvalues += 1
 
-        print("NUM_UPVALUES:", self.function.num_upvalues, self.upvalues[self.function.num_upvalues - 1])
-
-        assert len([x for x in self.upvalues if x is not None]) == self.function.num_upvalues
+        assert len([x for x in self.upvalues if x is not None]) == self.num_upvalues
         assert len([x for x in self.locals if x is not None]) == self.num_locals
+
+        debug_print(f"ending upvalues: {self.function.num_upvalues}")
+        debug_print(" ".join([str(uv) for uv in self.upvalues if uv is not None]))
+        for uv in self.upvalues[: self.function.num_upvalues]:
+            assert uv is not None
+            self.print_upvalue(uv)
 
         return UpvalueIndex(self.num_upvalues - 1)
 
-    def resolve_upvalue(self, name: Token) -> UpvalueIndex | None:
+    @EntryExit("Compiler.resolve_upvalue")
+    def resolve_upvalue(self, name: Token) -> LocalIndex | UpvalueIndex | None:
         if self.enclosing is None:
+            debug_print("returning None")
             return None
 
         local_index = self.enclosing.resolve_local(name)
@@ -162,14 +179,20 @@ class Compiler:
             local = self.enclosing.locals[local_index]
             assert local is not None
             local.captured = True
-            return self.add_upvalue(local_index, True)
+            idx = self.add_upvalue(local_index, True)
+            debug_print(f"returning local index {idx}")
+            return idx
 
         upvalue_index = self.enclosing.resolve_upvalue(name)
         if upvalue_index is not None:
-            return self.add_upvalue(upvalue_index, False)
+            idx = self.add_upvalue(upvalue_index, False)
+            print(f"returning upvalue_index {idx}")
+            return idx
 
+        print("returning None")
         return None
 
+    @EntryExit("Compiler.add_local")
     def add_local(self, name: Token) -> None:
         if self.num_locals == UINT8_MAX:
             raise CompilerError("too many locals")
@@ -179,6 +202,7 @@ class Compiler:
 
         assert len([x for x in self.locals if x is not None]) == self.num_locals
 
+    @EntryExit("Compiler.declare_variable")
     def declare_variable(self, name: Token):
         if self.scope_depth == 0:
             return
@@ -197,6 +221,7 @@ class Compiler:
 
         self.add_local(name)
 
+    @EntryExit("Compiler.mark_initialized")
     def mark_initialized(self) -> None:
         if self.scope_depth == 0:
             return
@@ -205,12 +230,11 @@ class Compiler:
         assert local is not None
         local.depth = self.scope_depth
 
-        print("LOCAL.DEPTH", self.num_locals, self.locals)
-
+    @EntryExit("Compiler.define_variable")
     def define_variable(self, global_index: ConstantIndex) -> None:
         if __debug__:
             assert all([_ is None for _ in self.locals[self.num_locals :]])
-            print("define_variable", self.locals[self.num_locals - 1], self.scope_depth)
+            debug_print(f"{self.locals[self.num_locals - 1]}, {self.scope_depth}")
 
         if self.scope_depth > 0:
             self.mark_initialized()
@@ -218,9 +242,9 @@ class Compiler:
 
         self.emit_bytes(Op.DEFINE_GLOBAL, global_index)
 
+    @EntryExit("Compiler.resolve_local")
     def resolve_local(self, name: Token) -> None | LocalIndex:
         for idx in range(self.num_locals - 1, -1, -1):
-            print("\t -> idx", idx)
             local = self.locals[idx]
             assert local is not None
             if local.name.literal == name.literal:
@@ -231,6 +255,7 @@ class Compiler:
         return None
 
     def emit_byte(self, op: Code) -> None:
+        debug_print(f"emit: {op}")
         self.function.chunk.write(op, self.vm.parser.peek(-1).line)
 
     def emit_bytes(self, op1: Op, op2: Code) -> None:
@@ -242,12 +267,15 @@ class Compiler:
         self.emit_byte(op2)
 
     def make_constant(self, value: Any) -> ConstantIndex:
+        assert self.vm.compiler is not None
         constant_index = self.vm.compiler.function.chunk.add_constant(value)
         if constant_index > UINT8_MAX:
             raise CompilerError("too many constants in one chunk")
 
+        debug_print(f"made constant {constant_index} -> {value} ")
         return constant_index
 
+    @EntryExit("Compiler.identifier_constant")
     def identifier_constant(self, name: Token) -> ConstantIndex:
         return self.make_constant(name.literal)
 
@@ -268,5 +296,6 @@ class Compiler:
         self.emit_byte(Op.JUMP_FAKE)
         return JumpDistance(len(self.function.chunk.code) - 1)
 
+    @EntryExit("Compiler.patch_jump")
     def patch_jump(self, offset: JumpDistance):
         self.function.chunk.code[offset] = JumpDistance(len(self.function.chunk.code) - offset - 1)
