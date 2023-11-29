@@ -55,34 +55,36 @@ class Compiler:
         "upvalues",
     )
 
-    def __init__(self, vm: "VM", funcname: str, functype: FuncType):
+    def __init__(self, vm: "VM", functype: FuncType):
         self.vm: "VM" = vm
-        self.name = funcname
+        self.enclosing = self.vm.compiler
+
         self.functype = functype
+
         self.scope_depth: int = 0
+
         self.num_locals: int = 0
         self.locals: list["Local | None"] = [None] * UINT8_MAX
+
         self.num_upvalues: int = 0
         self.upvalues: list["Upvalue | None"] = [None] * UINT8_MAX
 
-        try:
-            self.enclosing: "Compiler | None" = vm.compiler
-        except AttributeError:
-            self.enclosing = None  # root compiler
-
-        vm.compiler = self
-        self.function: ObjFunction = ObjFunction(vm, ObjType.FUNCTION, functype)
-
         if functype != FuncType.SCRIPT:
-            self.function.name = self.vm.parser.peek(-1).literal
+            funcname = self.vm.parser.peek(-1).literal
+        else:
+            funcname = "__main__"
 
-        if functype == FuncType.FUNCTION:
+        self.function: ObjFunction = ObjFunction(vm, ObjType.FUNCTION, funcname, functype)
+
+        if functype != FuncType.FUNCTION:
             name = Token(TokenType.IDENTIFIER, "this", None, 0, 0)
         else:
             name = Token(TokenType.IDENTIFIER, "", None, 0, 0)
 
         self.locals[self.num_locals] = Local(name)
         self.num_locals += 1
+
+        self.vm.compiler = self
 
     def print_upvalue(self, upvalue: Upvalue) -> None:
         if upvalue.is_local:
@@ -94,12 +96,15 @@ class Compiler:
     def compile(self) -> ObjFunction | None:
         self.vm.parser.current_index += 1
         while not self.vm.parser.match(TokenType.EOF):
+            if self.vm.parser.match(TokenType.NEWLINE):
+                continue
             self.vm.parser.declaration()
 
         return None if self.vm.parser.had_error else self.end()
 
     @EntryExit("Compiler.end")
     def end(self) -> ObjFunction:
+        print(self.locals)
         self.emit_return()
         current_function = self.function
         self.vm.compiler = self.enclosing
@@ -199,6 +204,8 @@ class Compiler:
 
         self.locals[self.num_locals] = Local(name)
         self.num_locals += 1
+
+        debug_print(f"ading local {name.literal} at depth {self.scope_depth} with ConstantIndex {self.num_locals - 1}")
 
         assert len([x for x in self.locals if x is not None]) == self.num_locals
 

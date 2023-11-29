@@ -11,6 +11,7 @@ from slug2.common import (
     Op,
     ParseError,
     UpvalueIndex,
+    debug_print,
 )
 from slug2.compiler import Compiler
 from slug2.token import Token, TokenType, tokenize
@@ -80,7 +81,7 @@ class Parser:
         if not self.match(tokentype):
             raise ParseError(msg)
 
-    @EntryExit("argument_count")
+    @EntryExit("Parser.argument_count")
     def argument_list(self) -> int:
         arg_count = 0
         if not self.check(TokenType.RIGHT_PAREN):
@@ -103,7 +104,7 @@ class Parser:
             self.tokens[: self.current_index] + self.tokens[self.current_index + strip :]
         )
 
-    @EntryExit("parse_precedence")
+    @EntryExit("Parser.parse_precedence")
     def parse_precedence(self, precedence: Precedence, group: bool = False) -> None:
         self.current_index += 1
 
@@ -136,23 +137,23 @@ class Parser:
         if assignable and self.match(TokenType.EQUAL):
             raise ParseError("invalid assignment target")
 
-    @EntryExit("expression")
+    @EntryExit("Parser.expression")
     def expression(self, group: bool = False) -> None:
         self.parse_precedence(Precedence.ASSIGNMENT, group=group)
 
-    @EntryExit("expression_statement")
+    @EntryExit("Parser.expression_statement")
     def expression_statement(self) -> None:
         assert self.vm.compiler is not None
         self.expression()
         self.vm.compiler.emit_byte(Op.POP)
 
-    @EntryExit("assert_statement")
+    @EntryExit("Parser.assert_statement")
     def assert_statement(self) -> None:
         assert self.vm.compiler is not None
         self.expression()
         self.vm.compiler.emit_byte(Op.ASSERT)
 
-    @EntryExit("print_statement")
+    @EntryExit("Parser.print_statement")
     def print_statement(self):
         assert self.vm.compiler is not None
         self.expression()
@@ -162,7 +163,7 @@ class Parser:
         while self.peek().tokentype == TokenType.NEWLINE:
             self.current_index += 1
 
-    @EntryExit("if_statement")
+    @EntryExit("Parser.if_statement")
     def if_statement(self) -> None:
         jumps_to_end: list[JumpDistance] = []
 
@@ -195,7 +196,7 @@ class Parser:
         for jump in jumps_to_end:
             self.vm.compiler.patch_jump(jump)
 
-    @EntryExit("return_statement")
+    @EntryExit("Parser.return_statement")
     def return_statement(self) -> None:
         assert self.vm.compiler is not None
 
@@ -211,7 +212,7 @@ class Parser:
             self.consume(TokenType.NEWLINE, "expect newline after return")
             self.vm.compiler.emit_byte(Op.RETURN)
 
-    @EntryExit("statement")
+    @EntryExit("Parser.statement")
     def statement(self) -> None:
         assert self.vm.compiler is not None
 
@@ -231,7 +232,7 @@ class Parser:
         else:
             self.expression_statement()
 
-    @EntryExit("parse_variable")
+    @EntryExit("Parser.parse_variable")
     def parse_variable(self, error_message: str) -> ConstantIndex:
         assert self.vm.compiler is not None
 
@@ -243,7 +244,7 @@ class Parser:
 
         return self.vm.compiler.identifier_constant(self.peek(-1))
 
-    @EntryExit("variable_declaration")
+    @EntryExit("Parser.variable_declaration")
     def variable_declaration(self) -> None:
         assert self.vm.compiler is not None
 
@@ -264,9 +265,10 @@ class Parser:
                     print(f"  {idx} -> {local}")
             print()
 
-    @EntryExit("function")
+    @EntryExit("Parser.function")
     def function(self, functype: FuncType) -> None:
-        self.vm.compiler = Compiler(self.vm, self.peek(-1).literal, functype)
+        debug_print(f"{str(self.peek(-1))} {self.peek(-1).literal}")
+        self.vm.compiler = Compiler(self.vm, functype)
         self.vm.compiler.begin_scope()
 
         while not self.match(TokenType.EQUAL):
@@ -276,14 +278,13 @@ class Parser:
             constant_index = self.parse_variable("expect parameter name")
             self.vm.compiler.define_variable(constant_index)
 
-        print(self.vm.compiler.function)
-
         self.consume(TokenType.LEFT_BRACE, "expect { after = in function declaration")
         self.block([TokenType.RIGHT_BRACE])
         self.consume(TokenType.RIGHT_BRACE, "expect } after function block")
 
         function = self.vm.compiler.end()
-        self.vm.compiler.emit_bytes(Op.CLOSURE, self.vm.compiler.make_constant(self.vm.compiler.function))
+        constant_index = self.vm.compiler.make_constant(function)
+        self.vm.compiler.emit_bytes(Op.CLOSURE, constant_index)
 
         for idx in range(function.num_upvalues):
             upvalue = self.vm.compiler.upvalues[idx]
@@ -291,7 +292,7 @@ class Parser:
 
             self.vm.compiler.emit_upvalue(upvalue.is_local, upvalue.index)
 
-    @EntryExit("function_declaration")
+    @EntryExit("Parser.function_declaration")
     def function_declaration(self) -> None:
         assert self.vm.compiler is not None
         constant_index = self.parse_variable("expect function name")
@@ -299,24 +300,24 @@ class Parser:
         self.function(FuncType.FUNCTION)
         self.vm.compiler.define_variable(constant_index)
 
-    @EntryExit("declaration")
+    @EntryExit("Parser.declaration")
     def declaration(self) -> None:
-        if self.match(TokenType.NEWLINE):
-            return
-        elif self.match(TokenType.LET):
+        if self.match(TokenType.LET):
             self.variable_declaration()
         elif self.match(TokenType.FN):
             self.function_declaration()
         else:
             self.statement()
 
-    @EntryExit("block")
+    @EntryExit("Parser.block")
     def block(self, end_tokentypes: list[TokenType]) -> None:
         end_tokentypes_or_eof = set(end_tokentypes + [TokenType.EOF])
         while not self.check_multiple(end_tokentypes_or_eof):
+            if self.match(TokenType.NEWLINE):
+                continue
             self.declaration()
 
-    @EntryExit("named_variable")
+    @EntryExit("Parser.named_variable")
     def named_variable(self, name: Token, can_assign: bool) -> None:
         assert self.vm.compiler is not None
 
@@ -339,7 +340,7 @@ class Parser:
             self.vm.compiler.emit_bytes(get_op, arg)
 
 
-@EntryExit("binary")
+@EntryExit("Parser.binary")
 def binary(parser: Parser, _: bool) -> None:
     previous = parser.peek(-1)
     operator_type: TokenType = previous.tokentype
@@ -376,7 +377,7 @@ def binary(parser: Parser, _: bool) -> None:
             raise ValueError("unknown binary operator")
 
 
-@EntryExit("unary")
+@EntryExit("Parser.unary")
 def unary(parser: Parser, _: bool) -> None:
     previous = parser.peek(-1)
     operator_type: TokenType = previous.tokentype
@@ -392,7 +393,7 @@ def unary(parser: Parser, _: bool) -> None:
             raise ValueError("unknown unary operator")
 
 
-@EntryExit("literal")
+@EntryExit("Parser.literal")
 def literal(parser: Parser, _: bool) -> None:
     previous = parser.peek(-1)
 
@@ -407,36 +408,36 @@ def literal(parser: Parser, _: bool) -> None:
             RuntimeError(f"unknown literal {tokentype}")
 
 
-@EntryExit("integer")
+@EntryExit("Parser.integer")
 def integer(parser: Parser, _: bool) -> None:
     assert parser.vm.compiler is not None
     parser.vm.compiler.emit_constant(parser.peek(-1).value)
 
 
-@EntryExit("float")
+@EntryExit("Parser.float")
 def _float(parser: Parser, _: bool) -> None:
     assert parser.vm.compiler is not None
     parser.vm.compiler.emit_constant(parser.peek(-1).value)
 
 
-@EntryExit("complex")
+@EntryExit("Parser.complex")
 def _complex(parser: Parser, _: bool) -> None:
     assert parser.vm.compiler is not None
     parser.vm.compiler.emit_constant(parser.peek(-1).value)
 
 
-@EntryExit("grouping")
+@EntryExit("Parser.grouping")
 def grouping(parser: Parser, _: bool) -> None:
     parser.expression(group=True)
     parser.consume(TokenType.RIGHT_PAREN, "didn't find closing )")
 
 
-@EntryExit("variable")
+@EntryExit("Parser.variable")
 def variable(parser: Parser, can_assign: bool) -> None:
     parser.named_variable(parser.peek(-1), can_assign)
 
 
-@EntryExit("call")
+@EntryExit("Parser.call")
 def call(parser: Parser, _: bool) -> None:
     arg_count = parser.argument_list()
     assert parser.vm.compiler is not None

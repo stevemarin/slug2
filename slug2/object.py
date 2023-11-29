@@ -32,11 +32,11 @@ class Obj(ABC):
 
 
 class ObjFunction(Obj):
-    def __init__(self, vm: "VM", objtype: ObjType, functype: FuncType) -> None:
+    def __init__(self, vm: "VM", objtype: ObjType, name: str, functype: FuncType) -> None:
         super().__init__(vm, objtype)
         self.arity: int = 0
         self.num_upvalues: int = 0
-        self.name: str = ""
+        self.name: str = name
         self.chunk = Chunk()
         self.functype: FuncType = functype
 

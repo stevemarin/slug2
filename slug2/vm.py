@@ -92,12 +92,14 @@ class VM:
         self.open_upvalue: "ObjUpvalue | None" = None
         self.objects: "Obj | None" = None
         self.parser: Parser = Parser(self)
-        self.compiler: Compiler | None = Compiler(self, "SCRIPT", FuncType.SCRIPT)
+        self.compiler: "Compiler | None" = None
 
     def push(self, value: Any) -> None:
         assert not isinstance(value, Uninitialized)
         self.stack[self.stack_top] = value
         self.stack_top += 1
+
+        print("pushing:", value)
 
     def pop(self) -> Any:
         self.stack_top -= 1
@@ -106,19 +108,24 @@ class VM:
 
         self.stack[self.stack_top] = uninitialized
 
+        print("popping:", value)
+
         return value
 
     def peek(self, distance: int = 0) -> Any:
-        return self.stack[self.stack_top - distance - 1]
+        return self.stack[self.stack_top - 1 - distance]
 
     def call(self, closure: ObjClosure, num_args: int) -> bool:
         if num_args != closure.function.arity:
+            print("aaa", closure.function)
+            print("bbb", self)
             raise RuntimeError(f"expected {closure.function.arity} arguments: got {num_args}")
 
         if self.num_frames == FRAMES_MAX:
             raise RuntimeError("stack overflow")
 
-        frame = CallFrame(closure, closure.function.chunk.code, StackIndex(self.stack_top - num_args - 1))
+        slots = StackIndex(self.stack_top - num_args - 1)
+        frame = CallFrame(closure, closure.function.chunk.code, slots)
         self.frames[self.num_frames] = frame
         self.num_frames += 1
 
@@ -180,6 +187,7 @@ class VM:
             instruction = frame.read_byte()
 
             if __debug__:
+                print(instruction)
                 print(self)
 
             if not isinstance(instruction, Op):
@@ -230,17 +238,17 @@ class VM:
                     _ = self.pop()
                 case Op.SET_GLOBAL:
                     name = frame.read_constant()
-                    if not isinstance(name, str):
-                        raise RuntimeError("global name not string")
+                    assert isinstance(name, str)
                     if name not in self.globals:
                         raise RuntimeError(f"global variable {name} not defined")
                     self.globals[name] = self.peek()
+                    print("SET GLOBALS:", self.globals)
                 case Op.GET_GLOBAL:
                     name = frame.read_constant()
-                    if not isinstance(name, str):
-                        raise RuntimeError("global name not string")
+                    assert isinstance(name, str)
                     if name not in self.globals:
                         raise RuntimeError(f"global variable {name} not defined")
+                    print("GET GLOBALS:", self.globals)
                     self.push(self.globals[name])
                 case Op.SET_UPVALUE:
                     upvalue_index = frame.read_byte()
@@ -278,8 +286,7 @@ class VM:
                         frame.ip += int(instruction)
                 case Op.CALL:
                     num_args = frame.read_byte()
-                    if not isinstance(num_args, NumArgs):
-                        raise RuntimeError(f"expected NumArgs. got {type(num_args)}")
+                    assert isinstance(num_args, NumArgs)
                     if not self.call_value(num_args):
                         return InterpretResult.RUNTIME_ERROR
                     frame = self.frames[self.num_frames - 1]
@@ -289,6 +296,7 @@ class VM:
 
                     closure = ObjClosure(self, ObjType.CLOSURE, function)
                     self.push(closure)
+
                     for idx in range(closure.num_upvalues):
                         is_local = frame.read_byte()
                         index = frame.read_byte()
@@ -306,6 +314,7 @@ class VM:
                 case Op.RETURN:
                     result = self.pop()
                     self.close_upvalue(frame.slots_start)
+
                     self.frames[self.num_frames - 1] = uninitialized
                     self.num_frames -= 1
 
@@ -315,26 +324,23 @@ class VM:
 
                     self.stack_top = frame.slots_start
                     self.push(result)
+
                     frame = self.frames[self.num_frames - 1]
                 case _:
                     raise NotImplementedError(f"op {instruction} not implemented")
 
-    def compile(self, source: str) -> ObjFunction | None:
-        self.parser = Parser(self, source)
-        # self.compiler = Compiler(self, FuncType.SCRIPT)
-        assert self.compiler is not None
-        maybe_func = self.compiler.compile()
-        # self.compiler = self.compiler.enclosing
-
-        return maybe_func
-
     def interpret(self, source: str) -> InterpretResult:
-        maybe_func = self.compile(source)
+        self.parser = Parser(self, source)
+        self.compiler = Compiler(self, FuncType.SCRIPT)
+
+        maybe_func = self.compiler.compile()
         if maybe_func is None:
             return InterpretResult.COMPLE_ERROR
 
-        maybe_func.name = "SCRIPT"
+        # push pop here for gc
+        self.push(maybe_func)
         closure = ObjClosure(self, ObjType.CLOSURE, maybe_func)
+        _ = self.pop()
 
         self.push(closure)
         self.call(closure, 0)
