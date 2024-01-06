@@ -16,6 +16,7 @@ from slug2.common import (
     StackIndex,
     Uninitialized,
     UpvalueIndex,
+    debug_print,
     uninitialized,
 )
 from slug2.compiler import Compiler
@@ -38,8 +39,8 @@ class CallFrame:
     def __init__(self, closure: ObjClosure, instructions: list[Code], slots_start: StackIndex) -> None:
         self.closure = closure
         self.instructions = instructions
-        self.ip = 0
         self.slots_start: StackIndex = slots_start
+        self.ip = 0
 
     def read_byte(self) -> Code:
         code = self.instructions[self.ip]
@@ -259,7 +260,8 @@ class VM:
                 case Op.GET_UPVALUE:
                     upvalue_index = frame.read_byte()
                     assert isinstance(upvalue_index, UpvalueIndex), type(upvalue_index)
-                    assert upvalue_index >= 0, upvalue_index
+                    assert 0 <= upvalue_index <= frame.closure.num_upvalues, upvalue_index
+                    debug_print(f"{frame.closure.upvalues}, {frame.closure.num_upvalues}")
                     upvalue = frame.closure.upvalues[upvalue_index]
                     assert isinstance(upvalue, ObjUpvalue), type(upvalue)
                     self.push(upvalue.stack_index)

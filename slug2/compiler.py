@@ -210,9 +210,11 @@ class Compiler:
         assert len([x for x in self.locals if x is not None]) == self.num_locals
 
     @EntryExit("Compiler.declare_variable")
-    def declare_variable(self, name: Token):
+    def declare_variable(self, name: Token) -> None:
+        # global variables are late bound, so we don't
+        # need to keep track of which declarations we've seen
         if self.scope_depth == 0:
-            return
+            return None
 
         for idx in range(self.num_locals - 1, -1, -1):
             local = self.locals[idx]
@@ -238,16 +240,19 @@ class Compiler:
         local.depth = self.scope_depth
 
     @EntryExit("Compiler.define_variable")
-    def define_variable(self, global_index: ConstantIndex) -> None:
+    def define_variable(self, global_index: ConstantIndex | None) -> None:
         if __debug__:
             assert all([_ is None for _ in self.locals[self.num_locals :]])
             debug_print(f"{self.locals[self.num_locals - 1]}, {self.scope_depth}")
 
         if self.scope_depth > 0:
             self.mark_initialized()
-            return
+            return None
 
-        self.emit_bytes(Op.DEFINE_GLOBAL, global_index)
+        if global_index is None:
+            self.emit_bytes(Op.DEFINE_GLOBAL, Op.NOOP)
+        else:
+            self.emit_bytes(Op.DEFINE_GLOBAL, global_index)
 
     @EntryExit("Compiler.resolve_local")
     def resolve_local(self, name: Token) -> None | LocalIndex:

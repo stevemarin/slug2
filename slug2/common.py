@@ -122,6 +122,8 @@ class Op(Enum):
     # SUPER_INVOKE = auto()
     # CLOSURE = auto()
 
+    NOOP = auto()
+
     NONE = auto()
     POP = auto()
     RETURN = auto()

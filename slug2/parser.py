@@ -233,16 +233,20 @@ class Parser:
             self.expression_statement()
 
     @EntryExit("Parser.parse_variable")
-    def parse_variable(self, error_message: str) -> ConstantIndex:
+    def parse_variable(self, error_message: str) -> ConstantIndex | None:
+        # if scope_depth > 0, we're not in global scope
+        # in local scopes, we look up variables by slot not name,
+        # so there's no need to return an index
         assert self.vm.compiler is not None
 
         self.consume(TokenType.IDENTIFIER, error_message)
+        identifier = self.peek(-1)
 
-        self.vm.compiler.declare_variable(self.peek(-1))
+        self.vm.compiler.declare_variable(identifier)
         if self.vm.compiler.scope_depth > 0:
-            return ConstantIndex(0)
+            return None
 
-        return self.vm.compiler.identifier_constant(self.peek(-1))
+        return self.vm.compiler.identifier_constant(identifier)
 
     @EntryExit("Parser.variable_declaration")
     def variable_declaration(self) -> None:
@@ -478,6 +482,8 @@ ParseRules = {
     TokenType.LESS_EQUAL:    ParseRule(None,      binary, Precedence.COMPARISON ),
     TokenType.EQUAL_EQUAL:   ParseRule(None,      binary, Precedence.EQUALITY   ),
     TokenType.NOT_EQUAL:     ParseRule(None,      binary, Precedence.EQUALITY   ),
+    
+    TokenType.EQUAL:         ParseRule(None,      None,   Precedence.NONE   ),
 
     TokenType.INTEGER:       ParseRule(integer,   None,   Precedence.NONE       ),
     TokenType.FLOAT:         ParseRule(_float,    None,   Precedence.NONE       ),
